@@ -12,8 +12,10 @@ hass.py
 *.yaml
 *.db
 *.log
-*.json
+#*.json
 !hacs.json
 /venv/
 
 __pycache__
+custom_components/loxone/homeassistant
+.vscode

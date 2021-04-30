@@ -1,52 +1,48 @@
 """
-Loxone cover component.
+Loxone Cover
+
+For more details about this component, please refer to the documentation at
+https://github.com/JoDehli/PyLoxone
 """
+
 import logging
 from typing import Any
 
-from homeassistant.components.cover import (
-    DEVICE_CLASS_AWNING,
-    DEVICE_CLASS_BLIND,
-    DEVICE_CLASS_CURTAIN,
-    DEVICE_CLASS_SHUTTER,
-    DEVICE_CLASS_GARAGE,
-    DEVICE_CLASS_DOOR,
-    DEVICE_CLASS_WINDOW,
-    CoverEntity,
-    SUPPORT_OPEN,
-    SUPPORT_CLOSE,
-    ATTR_POSITION
-)
-from homeassistant.const import (
-    CONF_VALUE_TEMPLATE, STATE_ON, STATE_OFF)
+from homeassistant.components.cover import (ATTR_POSITION, DEVICE_CLASS_AWNING,
+                                            DEVICE_CLASS_BLIND,
+                                            DEVICE_CLASS_CURTAIN,
+                                            DEVICE_CLASS_DOOR,
+                                            DEVICE_CLASS_GARAGE,
+                                            DEVICE_CLASS_SHUTTER,
+                                            DEVICE_CLASS_WINDOW, SUPPORT_CLOSE,
+                                            SUPPORT_OPEN, CoverEntity)
+from homeassistant.const import STATE_OFF, STATE_ON
+from homeassistant.core import callback
+from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.event import track_utc_time_change
 
 from . import LoxoneEntity
-from . import get_room_name_from_room_uuid, get_cat_name_from_cat_uuid, get_all_covers
+from .const import (DOMAIN, SENDDOMAIN, SUPPORT_CLOSE_TILT, SUPPORT_OPEN_TILT,
+                    SUPPORT_SET_POSITION, SUPPORT_SET_TILT_POSITION,
+                    SUPPORT_STOP, SUPPORT_STOP_TILT)
+from .helpers import (get_all_covers, get_cat_name_from_cat_uuid,
+                      get_room_name_from_room_uuid)
+from .miniserver import get_miniserver_from_config_entry
 
 _LOGGER = logging.getLogger(__name__)
 
-DOMAIN = 'loxone'
-EVENT = "loxone_event"
-SENDDOMAIN = "loxone_send"
-SUPPORT_SET_POSITION = 4
-SUPPORT_STOP = 8
-SUPPORT_OPEN_TILT = 16
-SUPPORT_CLOSE_TILT = 32
-SUPPORT_STOP_TILT = 64
-SUPPORT_SET_TILT_POSITION = 128
-
+NEW_COVERS = "covers"
 
 async def async_setup_platform(hass, config, async_add_devices, discovery_info={}):
-    """Set up the Demo covers."""
-    value_template = config.get(CONF_VALUE_TEMPLATE)
-    if value_template is not None:
-        value_template.hass = hass
+    """Set up the Loxone covers."""
+    return True
 
-    config = hass.data[DOMAIN]
-    loxconfig = config['loxconfig']
 
-    devices = []
+async def async_setup_entry(hass, config_entry, async_add_devices):
+    """Set Loxone covers."""
+    miniserver = get_miniserver_from_config_entry(hass, config_entry)
+    loxconfig = miniserver.lox_config.json
+    covers = []
 
     for cover in get_all_covers(loxconfig):
         cover.update({'hass': hass,
@@ -55,19 +51,26 @@ async def async_setup_platform(hass, config, async_add_devices, discovery_info={
 
         if cover['type'] == "Gate":
             new_gate = LoxoneGate(**cover)
-            devices.append(new_gate)
-            hass.bus.async_listen(EVENT, new_gate.event_handler)
+            covers.append(new_gate)
         elif cover['type'] == "Window":
             new_window = LoxoneWindow(**cover)
-            devices.append(new_window)
-            hass.bus.async_listen(EVENT, new_window.event_handler)
+            covers.append(new_window)
         else:
             new_jalousie = LoxoneJalousie(**cover)
-            devices.append(new_jalousie)
-            hass.bus.async_listen(EVENT, new_jalousie.event_handler)
+            covers.append(new_jalousie)
 
-    async_add_devices(devices)
-    return True
+    @callback
+    def async_add_covers(_):
+        async_add_devices(_, True)
+
+    miniserver.listeners.append(
+        async_dispatcher_connect(
+            hass, miniserver.async_signal_new_device(NEW_COVERS), async_add_covers
+        )
+    )
+
+    async_add_covers(covers)
+
 
 
 class LoxoneGate(LoxoneEntity, CoverEntity):
@@ -187,6 +190,16 @@ class LoxoneGate(LoxoneEntity, CoverEntity):
                 "room": self.room, "category": self.cat,
                 "plattform": "loxone"}
 
+    @property
+    def device_info(self):
+        return {
+            "identifiers": {(DOMAIN, self.unique_id)},
+            "name": self.name,
+            "manufacturer": "Loxone",
+            "model": "Gate",
+            "type": self.type
+        }
+
 
 class LoxoneWindow(LoxoneEntity, CoverEntity):
 
@@ -282,6 +295,16 @@ class LoxoneWindow(LoxoneEntity, CoverEntity):
         self.hass.bus.async_fire(SENDDOMAIN,
                                  dict(uuid=self.uuidAction, value="moveToPosition/{}".format(position)))
 
+    @property
+    def device_info(self):
+        return {
+            "identifiers": {(DOMAIN, self.unique_id)},
+            "name": self.name,
+            "manufacturer": "Loxone",
+            "model": "Window",
+            "type": self.type
+        }
+
 
 class LoxoneJalousie(LoxoneEntity, CoverEntity):
     """Loxone Jalousie"""
@@ -338,10 +361,10 @@ class LoxoneJalousie(LoxoneEntity, CoverEntity):
 
         if self.current_cover_tilt_position is not None:
             supported_features |= (
-                SUPPORT_OPEN_TILT
-                | SUPPORT_CLOSE_TILT
-                | SUPPORT_STOP_TILT
-                | SUPPORT_SET_TILT_POSITION
+                    SUPPORT_OPEN_TILT
+                    | SUPPORT_CLOSE_TILT
+                    | SUPPORT_STOP_TILT
+                    | SUPPORT_SET_TILT_POSITION
             )
         return supported_features
 
@@ -556,3 +579,13 @@ class LoxoneJalousie(LoxoneEntity, CoverEntity):
             self.stop_cover()
         elif not self._requested_closing and self._position >= self._set_position:
             self.stop_cover()
+
+    @property
+    def device_info(self):
+        return {
+            "identifiers": {(DOMAIN, self.unique_id)},
+            "name": self.name,
+            "manufacturer": "Loxone",
+            "model": "Jalousie",
+            "type": self.type
+        }

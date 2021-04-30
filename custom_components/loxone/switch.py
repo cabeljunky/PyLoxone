@@ -1,56 +1,40 @@
 """
+Loxone Switches
+
+For more details about this component, please refer to the documentation at
+https://github.com/JoDehli/PyLoxone
 """
 import logging
 
-import voluptuous as vol
 from homeassistant.components.switch import SwitchEntity
-from homeassistant.const import (
-    CONF_VALUE_TEMPLATE)
+from homeassistant.const import STATE_UNKNOWN
 
 from . import LoxoneEntity
-from . import get_room_name_from_room_uuid, get_cat_name_from_cat_uuid, get_all_switch_entities
+from .const import SENDDOMAIN
+from .helpers import (get_all_switch_entities, get_cat_name_from_cat_uuid,
+                      get_room_name_from_room_uuid)
+from .miniserver import get_miniserver_from_config_entry
 
 _LOGGER = logging.getLogger(__name__)
 
-DOMAIN = 'loxone'
-EVENT = "loxone_event"
-SENDDOMAIN = "loxone_send"
 
-from homeassistant.helpers.entity_component import EntityComponent
-from homeassistant.components import (
-    input_number,
-)
-
-from homeassistant.components.input_number import (
-    SERVICE_DECREMENT,
-    SERVICE_INCREMENT,
-    SERVICE_SET_VALUE,
-)
-
-
-async def async_setup_platform(hass, config, async_add_devices, discovery_info={}):
-    value_template = config.get(CONF_VALUE_TEMPLATE)
-    if value_template is not None:
-        value_template.hass = hass
-
-    config = hass.data[DOMAIN]
-    loxconfig = config['loxconfig']
+async def async_setup_entry(hass, config_entry, async_add_devices):
+    """Set up entry."""
+    miniserver = get_miniserver_from_config_entry(hass, config_entry)
+    loxconfig = miniserver.lox_config.json
     devices = []
-    entities = []
 
     for switch_entity in get_all_switch_entities(loxconfig):
         if switch_entity['type'] in ["Pushbutton", "Switch"]:
             switch_entity.update({'room': get_room_name_from_room_uuid(loxconfig, switch_entity.get('room', '')),
                                   'cat': get_cat_name_from_cat_uuid(loxconfig, switch_entity.get('cat', ''))})
             new_push_button = LoxoneSwitch(**switch_entity)
-            hass.bus.async_listen(EVENT, new_push_button.event_handler)
             devices.append(new_push_button)
 
         elif switch_entity['type'] == "TimedSwitch":
             switch_entity.update({'room': get_room_name_from_room_uuid(loxconfig, switch_entity.get('room', '')),
                                   'cat': get_cat_name_from_cat_uuid(loxconfig, switch_entity.get('cat', ''))})
             new_push_button = LoxoneTimedSwitch(**switch_entity)
-            hass.bus.async_listen(EVENT, new_push_button.event_handler)
             devices.append(new_push_button)
 
         elif switch_entity['type'] == "Intercom":
@@ -62,112 +46,14 @@ async def async_setup_platform(hass, config, async_add_devices, discovery_info={
                     _.update({'room': get_room_name_from_room_uuid(loxconfig, switch_entity.get('room', ''))})
                     _.update({'cat': get_cat_name_from_cat_uuid(loxconfig, switch_entity.get('cat', ''))})
                     new_push_button = LoxoneIntercomSubControl(**_)
-                    hass.bus.async_listen(EVENT, new_push_button.event_handler)
                     devices.append(new_push_button)
-        elif switch_entity['type'] in ['LeftRightAnalog', 'UpDownAnalog', 'Slider']:
-            # https://github.com/vinteo/hass-opensprinkler/blob/23fa23a628f3826310e8ade77d1dbe519b301bf7/opensprinkler.py#L52
-            switch_entity.update({'uuidAction': switch_entity['uuidAction'],
-                                  'name': switch_entity['name'],
-                                  'initial': switch_entity['details']['min'],
-                                  'min': switch_entity['details']['min'],
-                                  'max': switch_entity['details']['max'],
-                                  'step': switch_entity['details']['step'],
-                                  'cat': get_cat_name_from_cat_uuid(loxconfig, switch_entity.get('cat', '')),
-                                  'room': get_room_name_from_room_uuid(loxconfig, switch_entity.get('room', ''))
-                                  })
 
-            if switch_entity['type'] == 'UpDownAnalog':
-                switch_entity.update({'mode': 'box'})
-            else:
-                switch_entity.update({'mode': 'slider'})
-
-            new_loxone_input_select = LoxoneInputSelect(**switch_entity)
-            hass.bus.async_listen(EVENT, new_loxone_input_select.event_handler)
-            entities.append(new_loxone_input_select)
-
-    component = EntityComponent(_LOGGER, 'input_number', hass)
-    component.async_register_entity_service(SERVICE_INCREMENT, {}, "async_increment")
-    component.async_register_entity_service(SERVICE_DECREMENT, {}, "async_decrement")
-    component.async_register_entity_service(
-        SERVICE_SET_VALUE,
-        {vol.Required('value'): vol.Coerce(float)},
-        "async_set_value",
-    )
-    await component.async_add_entities(entities)
-
-    async_add_devices(devices)
+    async_add_devices(devices, True)
     return True
 
 
-class LoxoneInputSelect(LoxoneEntity, input_number.InputNumber):
-    def __init__(self, **kwargs):
-        LoxoneEntity.__init__(self, **kwargs)
-        input_number.InputNumber.__init__(self, config=kwargs)
-
-    async def event_handler(self, e):
-        if self.uuidAction in e.data:
-            self._current_value = e.data[self.uuidAction]
-            self.async_schedule_update_ha_state()
-
-    async def async_set_value(self, value):
-        """Set new value."""
-        num_value = float(value)
-        if num_value < self._minimum or num_value > self._maximum:
-            _LOGGER.warning(
-                "Invalid value: %s (range %s - %s)",
-                num_value,
-                self._minimum,
-                self._maximum,
-            )
-            return
-        self.hass.bus.async_fire(SENDDOMAIN,
-                                 dict(uuid=self.uuidAction, value=num_value))
-        self.async_schedule_update_ha_state()
-
-    async def async_increment(self):
-        """Increment value."""
-        new_value = self._current_value + self._step
-        if new_value > self._maximum:
-            _LOGGER.warning(
-                "Invalid value: %s (range %s - %s)",
-                new_value,
-                self._minimum,
-                self._maximum,
-            )
-            return
-        self._current_value = new_value
-        self.hass.bus.async_fire(SENDDOMAIN,
-                                 dict(uuid=self.uuidAction, value=new_value))
-        self.async_schedule_update_ha_state()
-
-    async def async_decrement(self):
-        """Decrement value."""
-        new_value = self._current_value - self._step
-        if new_value < self._minimum:
-            _LOGGER.warning(
-                "Invalid value: %s (range %s - %s)",
-                new_value,
-                self._minimum,
-                self._maximum,
-            )
-            return
-        self._current_value = new_value
-        self.hass.bus.async_fire(SENDDOMAIN,
-                                 dict(uuid=self.uuidAction, value=new_value))
-        self.async_schedule_update_ha_state()
-
-    @property
-    def device_state_attributes(self):
-        """Return device specific state attributes.
-
-        Implemented by platform classes.
-        """
-        state_dict = {"uuid": self.uuidAction,
-                      "room": self.room,
-                      "category": self.cat,
-                      "device_typ": self.type,
-                      "plattform": "loxone"}
-        return state_dict
+async def async_setup_platform(hass, config, async_add_devices, discovery_info={}):
+    return True
 
 
 class LoxoneTimedSwitch(LoxoneEntity, SwitchEntity):
@@ -177,7 +63,7 @@ class LoxoneTimedSwitch(LoxoneEntity, SwitchEntity):
         LoxoneEntity.__init__(self, **kwargs)
         self._icon = None
         self._assumed = False
-        self._state = False
+        self._state = STATE_UNKNOWN
         self._delay_remain = 0.0
         self._delay_time_total = 0.0
 
@@ -271,7 +157,7 @@ class LoxoneSwitch(LoxoneEntity, SwitchEntity):
     def __init__(self, **kwargs):
         LoxoneEntity.__init__(self, **kwargs)
         """Initialize the Loxone switch."""
-        self._state = False
+        self._state = STATE_UNKNOWN
         self._icon = None
         self._assumed = False
 

@@ -1,91 +1,101 @@
+"""
+Loxone Sensors
+
+For more details about this component, please refer to the documentation at
+https://github.com/JoDehli/PyLoxone
+"""
 import logging
-from homeassistant.const import (
-    CONF_VALUE_TEMPLATE, STATE_ON, STATE_OFF, CONF_NAME, CONF_UNIT_OF_MEASUREMENT)
-from homeassistant.helpers.entity import Entity
+
+import homeassistant.helpers.config_validation as cv
 import voluptuous as vol
 from homeassistant.components.sensor import PLATFORM_SCHEMA
-import homeassistant.helpers.config_validation as cv
+from homeassistant.const import (CONF_NAME, CONF_UNIT_OF_MEASUREMENT,
+                                 CONF_VALUE_TEMPLATE, STATE_OFF, STATE_ON,
+                                 STATE_UNKNOWN, CONF_DEVICE_CLASS)
+from homeassistant.core import callback
+from homeassistant.helpers.dispatcher import async_dispatcher_connect
 
 from . import LoxoneEntity
-from . import get_room_name_from_room_uuid, get_cat_name_from_cat_uuid
-from . import get_all_analog_info, get_all_digital_info, get_all
+from .const import CONF_ACTIONID, DOMAIN, SENDDOMAIN
+from .helpers import (get_all, get_all_analog_info, get_all_digital_info,
+                      get_cat_name_from_cat_uuid, get_room_name_from_room_uuid)
+from .miniserver import get_miniserver_from_config_entry
+
+NEW_SENSOR = "sensors"
 
 _LOGGER = logging.getLogger(__name__)
 
 DEFAULT_NAME = 'Loxone Sensor'
-DEFAULT_FORCE_UPDATE = False
 
-CONF_UUID = "uuid"
-EVENT = "loxone_event"
-DOMAIN = 'loxone'
-SENDDOMAIN = "loxone_send"
-CONF_ACTIONID = "uuidAction"
 PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
     {
         vol.Required(CONF_ACTIONID): cv.string,
         vol.Optional(CONF_NAME): cv.string,
         vol.Optional(CONF_UNIT_OF_MEASUREMENT): cv.string,
+        vol.Optional(CONF_DEVICE_CLASS): cv.string,
     }
 )
 
 
 async def async_setup_platform(hass, config, async_add_devices,
                                discovery_info: object = {}):
-    """Set up Loxone Sensor."""
-
+    """Set up Loxone Sensor from yaml"""
     value_template = config.get(CONF_VALUE_TEMPLATE)
     if value_template is not None:
         value_template.hass = hass
 
     # Devices from yaml
     if config != {}:
-        # Here Setup alle Sensors in Yaml-File
+        # Here setup all Sensors in Yaml-File
         new_sensor = LoxoneCustomSensor(**config)
-        hass.bus.async_listen(EVENT, new_sensor.event_handler)
-        # hass.bus.async_listen(EVENT_STATE_CHANGED, new_sensor.changed_handler)
-        # hass.bus.async_listen("event_websocket_command", new_sensor.websocket_handler)
         async_add_devices([new_sensor])
         return True
+    return True
 
-    config = hass.data[DOMAIN]
-    loxconfig = config['loxconfig']
 
-    devices = []
+async def async_setup_entry(hass, config_entry, async_add_devices):
+    """Set up entry."""
+    miniserver = get_miniserver_from_config_entry(hass, config_entry)
+
+    loxconfig = miniserver.lox_config.json
+    sensors = []
     if 'softwareVersion' in loxconfig:
-        version_sensor = LoxoneVersionSensor(loxconfig['softwareVersion'])
-        devices.append(version_sensor)
+        sensors.append(LoxoneVersionSensor(loxconfig['softwareVersion']))
 
     for sensor in get_all_analog_info(loxconfig):
         sensor.update({'typ': 'analog',
                        'room': get_room_name_from_room_uuid(loxconfig, sensor.get('room', '')),
                        'cat': get_cat_name_from_cat_uuid(loxconfig, sensor.get('cat', ''))})
 
-        new_sensor = Loxonesensor(**sensor)
-        hass.bus.async_listen(EVENT, new_sensor.event_handler)
-        devices.append(new_sensor)
+        sensors.append(Loxonesensor(**sensor))
 
     for sensor in get_all_digital_info(loxconfig):
         sensor.update({'typ': 'digital',
                        'room': get_room_name_from_room_uuid(loxconfig, sensor.get('room', '')),
                        'cat': get_cat_name_from_cat_uuid(loxconfig, sensor.get('cat', ''))})
-
-        new_sensor = Loxonesensor(**sensor)
-        hass.bus.async_listen(EVENT, new_sensor.event_handler)
-        devices.append(new_sensor)
+        sensors.append(Loxonesensor(**sensor))
 
     for sensor in get_all(loxconfig, "TextInput"):
         sensor.update({'room': get_room_name_from_room_uuid(loxconfig, sensor.get('room', '')),
                        'cat': get_cat_name_from_cat_uuid(loxconfig, sensor.get('cat', ''))})
 
-        new_sensor = LoxoneTextSensor(**sensor)
-        hass.bus.async_listen(EVENT, new_sensor.event_handler)
-        devices.append(new_sensor)
+        sensors.append(LoxoneTextSensor(**sensor))
 
-    async_add_devices(devices)
-    return True
+    @callback
+    def async_add_sensors(_):
+        async_add_devices(_, True)
+
+    miniserver.listeners.append(
+        async_dispatcher_connect(
+            hass, miniserver.async_signal_new_device(NEW_SENSOR), async_add_sensors
+        )
+    )
+
+    async_add_sensors(sensors)
+    # return True
 
 
-class LoxoneCustomSensor(Entity):
+class LoxoneCustomSensor(LoxoneEntity):
     def __init__(self, **kwargs):
         self._name = kwargs['name']
         if "uuidAction" in kwargs:
@@ -97,11 +107,25 @@ class LoxoneCustomSensor(Entity):
         else:
             self._unit_of_measurement = ""
 
-        self._state = "-"
+        if "device_class" in kwargs:
+            self._device_class = kwargs['device_class']
+        else:
+            self._device_class = None
+
+        self._state = STATE_UNKNOWN
 
     async def event_handler(self, e):
         if self.uuidAction in e.data:
-            self._state = e.data[self.uuidAction]
+            data = e.data[self.uuidAction]
+            if isinstance(data, (list, dict)):
+                data = str(data)
+                if len(data) >= 255:
+                    self._state = data[:255]
+                else:
+                    self._state = data
+            else:
+                self._state = data
+
             self.schedule_update_ha_state()
 
     @property
@@ -118,21 +142,26 @@ class LoxoneCustomSensor(Entity):
         """Return the unit of measurement of this entity, if any."""
         return self._unit_of_measurement
 
-    # async def changed_handler(self, e):
-    #     if e.data.get("new_state"):
-    #         if e.data["entity_id"] == self.entity_id:
-    #             print(e.data)
-    #
-    # async def websocket_handler(self, e):
-    #     print(e)
+    @property
+    def device_state_attributes(self):
+        """Return device specific state attributes.
+
+        Implemented by platform classes.
+        """
+        return {"uuid": self.uuidAction, "plattform": "loxone", "show_last_changed": "true"}
+
+    @property
+    def device_class(self):
+        """Return the class of this device, from component DEVICE_CLASSES."""
+        return self._device_class
 
 
-class LoxoneVersionSensor(Entity):
+class LoxoneVersionSensor(LoxoneEntity):
     def __init__(self, version_list):
         try:
             self.version = ".".join([str(x) for x in version_list])
         except:
-            self.version = "-"
+            self.version = STATE_UNKNOWN
 
     @property
     def name(self):
@@ -152,13 +181,18 @@ class LoxoneVersionSensor(Entity):
         """Return the sensor icon."""
         return "mdi:information-outline"
 
+    @property
+    def unique_id(self):
+        """Return unique ID."""
+        return "loxone_software_version"
+
 
 class LoxoneTextSensor(LoxoneEntity):
     """Representation of a Text Sensor."""
 
     def __init__(self, **kwargs):
         LoxoneEntity.__init__(self, **kwargs)
-        self._state = ""
+        self._state = STATE_UNKNOWN
 
     async def event_handler(self, e):
         if self.states['text'] in e.data:
@@ -198,9 +232,9 @@ class Loxonesensor(LoxoneEntity):
     def __init__(self, **kwargs):
         LoxoneEntity.__init__(self, **kwargs)
         """Initialize the sensor."""
-        self._state = 0.0
+        self._state = STATE_UNKNOWN
         self._unit_of_measurement = None
-        self._format = None
+        self._format = self._get_format(kwargs.get('details', {}).get('format', ""))
         self._on_state = STATE_ON
         self._off_state = STATE_OFF
         self.extract_attributes()
@@ -208,7 +242,7 @@ class Loxonesensor(LoxoneEntity):
     async def event_handler(self, e):
         if self.uuidAction in e.data:
             if self.typ == "analog":
-                self._state = round(e.data[self.uuidAction], 1)
+                self.state = e.data[self.uuidAction]
             elif self.typ == "digital":
                 self._state = e.data[self.uuidAction]
                 if self._state == 1.0:
@@ -235,18 +269,34 @@ class Loxonesensor(LoxoneEntity):
     @property
     def state(self):
         """Return the state of the sensor."""
-        if self._format is not None:
+        if self._format is not None and self._state != STATE_UNKNOWN:
             try:
-                return self._format % self._state
+                return self._format % float(self._state)
             except ValueError:
                 return self._state
         else:
             return self._state
 
+    @state.setter
+    def state(self, value):
+        if self._format is not None and self._state != STATE_UNKNOWN:
+            try:
+                self._state = self._format % value
+            except ValueError:
+                self._state = value
+        else:
+            self._state = value
+
     @property
     def unit_of_measurement(self):
         """Return the unit of measurement."""
         return self._unit_of_measurement
+
+    @property
+    def icon(self):
+        """Return the sensor icon."""
+        if self.typ == "analog":
+            return "mdi:chart-bell-curve"
 
     @property
     def device_state_attributes(self):
@@ -257,3 +307,22 @@ class Loxonesensor(LoxoneEntity):
         return {"uuid": self.uuidAction, "device_typ": self.typ + "_sensor",
                 "plattform": "loxone", "room": self.room, "category": self.cat,
                 "show_last_changed": "true"}
+
+    @property
+    def device_info(self):
+        if self.typ == "analog":
+            return {
+                "identifiers": {(DOMAIN, self.unique_id)},
+                "name": self.name,
+                "manufacturer": "Loxone",
+                "model": "Sensor analog",
+                "type": self.typ
+            }
+        else:
+            return {
+                "identifiers": {(DOMAIN, self.unique_id)},
+                "name": self.name,
+                "manufacturer": "Loxone",
+                "model": "Sensor digital",
+                "type": self.typ
+            }

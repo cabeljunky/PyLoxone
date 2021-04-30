@@ -1,33 +1,30 @@
+"""
+Loxone Scenes
+
+For more details about this component, please refer to the documentation at
+https://github.com/JoDehli/PyLoxone
+"""
+
 import logging
 
 from homeassistant.components.scene import Scene
-from homeassistant.const import (
-    CONF_VALUE_TEMPLATE)
 from homeassistant.helpers.entity_platform import async_call_later
+
+from .const import CONF_SCENE_GEN, DEFAULT_DELAY_SCENE, DOMAIN, SENDDOMAIN
+from .miniserver import get_miniserver_from_config
 
 _LOGGER = logging.getLogger(__name__)
 
-DEFAULT_NAME = 'Loxone Scene'
-DEFAULT_FORCE_UPDATE = False
 
-CONF_UUID = "uuid"
-DOMAIN = 'loxone'
-SENDDOMAIN = "loxone_send"
-CONF_SCENE_GEN = "generate_scenes"
-
-
-async def async_setup_platform(hass, config, async_add_devices,
-                               discovery_info=None):
+async def async_setup_entry(hass, config_entry, async_add_devices):
     """Set up Scenes."""
-    if discovery_info is None:
-        return
-    value_template = config.get(CONF_VALUE_TEMPLATE)
-    if value_template is not None:
-        value_template.hass = hass
+    delay_scene = config_entry.options.get("generate_scenes_delay", DEFAULT_DELAY_SCENE)
 
-    config = hass.data[DOMAIN]
+    miniserver = get_miniserver_from_config(hass, hass.data[DOMAIN])
+    if miniserver is None:
+        return False
 
-    async def async_call():
+    async def gen_scenes(_):
         devices = []
         entity_ids = hass.states.async_entity_ids("LIGHT")
         for _ in entity_ids:
@@ -40,10 +37,17 @@ async def async_setup_platform(hass, config, async_add_devices,
                         mood_id = entity.get_id_by_moodname(effect)
                         uuid = entity.uuidAction
                         devices.append(Loxonelightscene("{}-{}".format(entity.name, effect), mood_id, uuid))
-        async_add_devices(devices)
+        async_add_devices(devices, True)
 
-    if config[CONF_SCENE_GEN]:
-        async_call_later(hass, 0.2, async_call())
+    if miniserver.config_entry.options.get(CONF_SCENE_GEN, False):
+        async_call_later(hass, delay_scene, gen_scenes)
+
+    return True
+
+
+async def async_setup_platform(hass, config, async_add_devices,
+                               discovery_info=None):
+    """Set up Scenes."""
     return True
 
 

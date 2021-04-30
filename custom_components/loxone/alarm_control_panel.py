@@ -2,34 +2,21 @@
 import logging
 import re
 
-from homeassistant.components.alarm_control_panel import AlarmControlPanelEntity, FORMAT_NUMBER, FORMAT_TEXT
-
-import homeassistant.components.alarm_control_panel as alarm
 import homeassistant.helpers.config_validation as cv
 import voluptuous as vol
-from homeassistant.components.alarm_control_panel import PLATFORM_SCHEMA
+from homeassistant.components.alarm_control_panel import (
+    FORMAT_NUMBER, FORMAT_TEXT, PLATFORM_SCHEMA, AlarmControlPanelEntity)
 from homeassistant.components.alarm_control_panel.const import (
-    SUPPORT_ALARM_ARM_AWAY,
-    SUPPORT_ALARM_ARM_HOME,
-    SUPPORT_ALARM_ARM_NIGHT
-)
-from homeassistant.const import (
-    CONF_CODE,
-    CONF_NAME,
-    CONF_PASSWORD,
-    CONF_USERNAME,
-    STATE_ALARM_ARMED_AWAY,
-    STATE_ALARM_DISARMED,
-)
+    SUPPORT_ALARM_ARM_AWAY, SUPPORT_ALARM_ARM_HOME, SUPPORT_ALARM_ARM_NIGHT)
+from homeassistant.const import (CONF_CODE, CONF_NAME, CONF_PASSWORD,
+                                 CONF_USERNAME, STATE_ALARM_ARMED_AWAY,
+                                 STATE_ALARM_DISARMED)
 
 from . import LoxoneEntity
-from . import get_all_alarm, get_room_name_from_room_uuid, get_cat_name_from_cat_uuid
-
-CONF_UUID = "uuid"
-EVENT = "loxone_event"
-DOMAIN = 'loxone'
-SENDDOMAIN = "loxone_send"
-SECUREDSENDDOMAIN = "loxone_send_secured"
+from .const import DOMAIN, EVENT, SECUREDSENDDOMAIN, SENDDOMAIN
+from .helpers import (get_all_alarm, get_cat_name_from_cat_uuid,
+                      get_room_name_from_room_uuid)
+from .miniserver import get_miniserver_from_config_entry
 
 DEFAULT_NAME = 'Loxone Alarm'
 DEFAULT_FORCE_UPDATE = False
@@ -48,13 +35,14 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
 
 async def async_setup_platform(hass, config, async_add_devices, discovery_info=None):
     """Set up Loxone Alarms."""
-    if discovery_info is None:
-        return
+    return True
 
-    config = hass.data[DOMAIN]
-    loxconfig = config['loxconfig']
+
+async def async_setup_entry(hass, config_entry, async_add_devices):
+    """Set up Loxone Alarms."""
+    miniserver = get_miniserver_from_config_entry(hass, config_entry)
+    loxconfig = miniserver.lox_config.json
     devices = []
-
     for loxone_alarm in get_all_alarm(loxconfig):
         loxone_alarm.update({'room': get_room_name_from_room_uuid(loxconfig, loxone_alarm.get('room', '')),
                              'cat': get_cat_name_from_cat_uuid(loxconfig, loxone_alarm.get('cat', '')),
@@ -62,7 +50,7 @@ async def async_setup_platform(hass, config, async_add_devices, discovery_info=N
         new_alarm = LoxoneAlarm(**loxone_alarm)
         hass.bus.async_listen(EVENT, new_alarm.event_handler)
         devices.append(new_alarm)
-    async_add_devices(devices)
+    async_add_devices(devices, True)
     return True
 
 
@@ -233,3 +221,13 @@ class LoxoneAlarm(LoxoneEntity, AlarmControlPanelEntity):
         if isinstance(self._code, str) and re.search("^\\d+$", self._code):
             return FORMAT_NUMBER
         return FORMAT_TEXT
+
+    @property
+    def device_info(self):
+        return {
+            "identifiers": {(DOMAIN, self.unique_id)},
+            "name": self.name,
+            "manufacturer": "Loxone",
+            "model": "Alarm",
+            "type": self.type
+        }

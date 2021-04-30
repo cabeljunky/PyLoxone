@@ -1,6 +1,11 @@
 # PyLoxone
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/custom-components/hacs)
 
+If you want to support my work on this binding you can buy me a coffee:
+
+<a href="https://www.buymeacoffee.com/JoDehli" target="_blank"><img src="https://www.buymeacoffee.com/assets/img/custom_images/orange_img.png" alt="Buy Me A Coffee" style="height: 41px !important;width: 174px !important;box-shadow: 0px 3px 2px 0px rgba(190, 190, 190, 0.5) !important;-webkit-box-shadow: 0px 3px 2px 0px rgba(190, 190, 190, 0.5) !important;" ></a>
+
+
 Home Assistant binding for Loxone. 
 
 A special thanks to Pawel Pieczul from the great openhab2 house automation software. 
@@ -8,24 +13,34 @@ He really helped me a lot to with the new token based authentification. Thanks P
 
 #### This release works for the version 0.103.0 and newer!!
 
-## Manual installation
-1. Download the zip file and extract  all files into your `config` directory.
-2. Add the following section to your `configuration.yaml` and restart:
 
-```yaml
-loxone:
-  port: 8080
-  host: hostadress
-  username: username
-  password: password
-  generate_scenes: false # default is true
-```
+## Config for the gen2 miniserver
+If you have the gen2 miniserver you must use your loxonecloud address. You can find out your address in
+the LoxoneConifg software. You need your serial number. You also need to forward your ports correctly. 
+Here is an example config:
+
+![alt text](cloud_config.png)
+
+## Manual installation
+1. Download the zip file and extract all files.
+2. Copy the ***custom_components*** and ***www*** folder in the same folder where your configuration.yaml is located
+3. Restart Home-Assitant
+4. Go to Configuration -> Integrations and search for Pyloxone
+5. Add the Intgration and fill out all required fields
+6. Restart Home-Assitant
 
 ## Hacs installation
 1. Install hacs to your homeassistant installation. See https://hacs.xyz/docs/installation/manual
 2. Add this repository to hacs: https://github.com/JoDehli/PyLoxone
-3. Install the PyLoxone binding
-4. Add the following section to your `configuration.yaml` and restart:
+3. Install the PyLoxone binding 
+4. Restart Home-Assitant
+5. Go to Configuration -> Integrations and search for Pyloxone
+6. Add the Intgration and fill out all required fields
+7. Restart Home-Assitant
+
+
+## Configuration over yaml (deprecated)
+Add the following entries to your configuration.yaml:
 
 ```yaml
 loxone:
@@ -34,7 +49,11 @@ loxone:
   username: username
   password: password
   generate_scenes: false # default is true
+  generate_scenes_delay: 5
+  generate_lightcontroller_subcontrols: false
 ```
+
+
 
 ## Websocket direct command
 Send command direct to the loxone for example a pulse event to a switch:
@@ -53,11 +72,12 @@ Send command direct to the loxone for example a pulse event to a switch:
 - Intercom
 - LightControllerV2
 - Alarm
-- LeftRightAnalog, UpDownAnalog, Slider
+- RoomControllerV2 (thanks for the implementation [ztamas83](https://github.com/ztamas83) )
 
-## If your Device is not supported
+### If your Device is not supported
 You can integrate nearly every Loxone Entity in your Home-Assistent System by adding a custom sensor to your yaml file. 
 
+### Example 1 with a RoomComfortTemperature
 Here is a example of a sensor which is displaying the comfort temperature of a room controller v2:
 ```yaml
 sensor:
@@ -65,8 +85,9 @@ sensor:
     platform: loxone
     uuidAction: "15beed5b-01ab-d81d-ffff2b06d5b9c660"
     unit_of_measurement: "°C"
+    device_class: "temperature"    # Use device classes from homeassitant for example temperature, humidity, voltage   
 ```
-In this example a sensor with the name roomcomforttemperature (sensor.roomcomforttemperature) is created. The sensor is listening to all events from the loxone system with the specified uuid ([How do you get the uuid?](#-How-do-you-get-the-uuid?)).
+In this example a sensor with the name roomcomforttemperature (sensor.roomcomforttemperature) is created. The sensor is listening to all events from the loxone system with the specified uuid ([How do you get the uuid?](https://github.com/JoDehli/PyLoxone/tree/dev#how-do-you-get-the-uuid)).
 
 You can also send any websocket to a loxone entity for example to increase and decrease the temperature of a room controller v2. Here is a script that raises and lowers the temperature in 0.5 °C steps:
 
@@ -89,6 +110,39 @@ script:
         value: "setComfortTemperature/{{ states('sensor.roomcomforttemperature')|float-0.5}}"
       service: loxone.event_websocket_command
 ```
+
+### Example 2 with a UpDownAnalog
+
+- First get the uuidAction as described above for example. Let's assume your uuidAction for the UpDownAnalog is 152ecfaa-03ac-f715-ffff403fb0c34b9e.
+- Create a Sensor do display the current value of the UpDownAnalog like this:
+```yaml
+sensor:
+  - name: "Up and Down Sensor"
+    platform: loxone
+    uuidAction: "152ecfaa-03ac-f715-ffff403fb0c34b9e"
+    unit_of_measurement: ""
+```
+- Create a script for incrementing up and down like this:
+```yaml
+down:
+  alias: Down
+  mode: single
+  sequence:
+  - data_template:
+      uuid: "152ecfaa-03ac-f715-ffff403fb0c34b9e"
+      value: "{{ states('sensor.up_and_down_sensor')|float-1}}"
+    service: loxone.event_websocket_command
+
+up:
+  alias: Up
+  mode: single
+  sequence:
+  - data_template:
+      uuid: "152ecfaa-03ac-f715-ffff403fb0c34b9e"
+      value: "{{ states('sensor.up_and_down_sensor')|float+1}}"
+    service: loxone.event_websocket_command
+```
+
 The commands for each entity can be found in the structure file. You can download it from the [Loxone Hompage](https://www.loxone.com/dede/kb/api/).
 
  ### How do you get the uuid?
