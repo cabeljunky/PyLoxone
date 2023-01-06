@@ -7,12 +7,11 @@ https://github.com/JoDehli/PyLoxone
 
 import logging
 from abc import ABC
-
+from homeassistant.const import UnitOfTemperature
 from homeassistant.components.climate import (
     PLATFORM_SCHEMA,
     SUPPORT_PRESET_MODE,
     SUPPORT_TARGET_TEMPERATURE,
-    TEMP_CELSIUS,
     ClimateEntity,
 )
 from homeassistant.components.climate.const import (
@@ -23,19 +22,14 @@ from homeassistant.components.climate.const import (
     HVAC_MODE_OFF,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import callback, HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.typing import ConfigType, DiscoveryInfoType
-
 from voluptuous import All, Optional, Range
 
 from . import LoxoneEntity
 from .const import CONF_HVAC_AUTO_MODE, DOMAIN, SENDDOMAIN
-from .helpers import (
-    get_all,
-    get_cat_name_from_cat_uuid,
-    get_room_name_from_room_uuid,
-)
+from .helpers import get_all, get_cat_name_from_cat_uuid, get_room_name_from_room_uuid
 from .miniserver import get_miniserver_from_hass
 
 _LOGGER = logging.getLogger(__name__)
@@ -74,6 +68,7 @@ async def async_setup_platform(
     # config = hass.data[DOMAIN]
     return True
 
+
 async def async_setup_entry(
     hass: HomeAssistant,
     config_entry: ConfigEntry,
@@ -100,6 +95,7 @@ async def async_setup_entry(
         devices.append(new_thermostat)
 
     async_add_entities(devices)
+
 
 class LoxoneRoomControllerV2(LoxoneEntity, ClimateEntity, ABC):
     """Loxone room controller"""
@@ -131,7 +127,7 @@ class LoxoneRoomControllerV2(LoxoneEntity, ClimateEntity, ABC):
         return self.type
 
     async def event_handler(self, event):
-        _LOGGER.debug(f"Climate Event data: {event.data}")
+        # _LOGGER.debug(f"Climate Event data: {event.data}")
         update = False
 
         for key in set(self._stateAttribUuids.values()) & event.data.keys():
@@ -141,7 +137,7 @@ class LoxoneRoomControllerV2(LoxoneEntity, ClimateEntity, ABC):
         if update:
             self.schedule_update_ha_state()
 
-        _LOGGER.debug(f"State attribs after event handling: {self._stateAttribValues}")
+        # _LOGGER.debug(f"State attribs after event handling: {self._stateAttribValues}")
 
     def get_state_value(self, name):
         uuid = self._stateAttribUuids[name]
@@ -161,7 +157,21 @@ class LoxoneRoomControllerV2(LoxoneEntity, ClimateEntity, ABC):
             "room": self.room,
             "category": self.cat,
             "platform": "loxone",
+            "is_overridden": self.is_overridden,
         }
+
+    @property
+    def is_overridden(self) -> bool:
+        # Needed because loxone uses these variables names. Simply workaround define it also here.
+        true = True
+        false = False
+        null = None
+        _override_entries = self.get_state_value("overrideEntries")
+        if _override_entries:
+            _override_entries = eval(_override_entries)
+            if isinstance(_override_entries, list) and len(_override_entries) > 0:
+                return True
+        return False
 
     @property
     def current_temperature(self):
@@ -208,8 +218,11 @@ class LoxoneRoomControllerV2(LoxoneEntity, ClimateEntity, ABC):
     @property
     def temperature_unit(self):
         """Return the unit of measurement used by the platform."""
-
-        return TEMP_CELSIUS
+        if "format" in self.details:
+            if self.details["format"].find("°"):
+                return  UnitOfTemperature.CELSIUS
+            return  UnitOfTemperature.FAHRENHEIT
+        return  UnitOfTemperature.CELSIUS
 
     @property
     def target_temperature(self):
@@ -276,5 +289,5 @@ class LoxoneRoomControllerV2(LoxoneEntity, ClimateEntity, ABC):
             "manufacturer": "Loxone",
             "model": "RoomControllerV2",
             "type": self.type,
-            "suggested_area": self.room
+            "suggested_area": self.room,
         }
