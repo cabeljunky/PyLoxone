@@ -290,6 +290,7 @@ async def async_setup_entry(hass, config_entry):
                         ], "Loxone Group", "loxone_group")
                 except Exception as err:
                     _LOGGER.error("Error Group generation: %s", err)
+            miniserver. miniserver.device_monitor
 
     await miniserver.async_set_callback(message_callback)
 

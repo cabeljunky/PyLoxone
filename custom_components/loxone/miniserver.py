@@ -114,6 +114,13 @@ class MiniServer:
         except:
             return None
 
+    @property
+    def device_monitor(self):
+        try:
+            return self.lox_config.json["msInfo"]["deviceMonitor"]
+        except:
+            return None
+
     @callback
     async def shutdown(self, event) -> None:
         await self.api.stop()
