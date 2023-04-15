@@ -146,7 +146,7 @@ class LoxoneVentilation(LoxoneEntity, FanEntity):
         LoxoneEntity.__init__(self, **kwargs)
 
         self._state = STATE_UNKNOWN
-        self._format = self._get_format(self.details["format"])
+        self._format = self._get_format(kwargs.get("details", {}).get("format", ""))
         self._attr_available = True
 
         self._stateAttribUuids = kwargs["states"]
