@@ -438,3 +438,6 @@ class Loxonesensor(LoxoneEntity, SensorEntity):
     @native_unit_of_measurement.setter
     def native_unit_of_measurement(self, value):
         self._attr_native_unit_of_measurement = value
+
+        if entity_description := self._get_entity_description():
+            self.entity_description = entity_description
