@@ -429,3 +429,7 @@ class Loxonesensor(LoxoneEntity, SensorEntity):
                 "uuid": self.uuidAction,
                 "suggested_area": self.room,
             }
+
+    @self._attr_native_unit_of_measurement.setter
+    def native_unit_of_measurement(self, value):
+        self._attr_native_unit_of_measurement = value
