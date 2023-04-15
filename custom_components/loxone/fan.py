@@ -87,7 +87,7 @@ async def async_setup_entry(
                 "cat": fan.get("cat", ""),
                 "name": fan["name"] + " - Humidity",
                 "details": {"format": "%.1f%"},
-                "device_class": "humidity",
+                #"device_class": "humidity",
                 "async_add_devices": async_add_entities,
             }
             entites.append(Loxonesensor(**humidity))
@@ -100,7 +100,7 @@ async def async_setup_entry(
                 "cat": fan.get("cat", ""),
                 "name": fan["name"] + " - Air Quality",
                 "details": {"format": "%.1fppm"},
-                "device_class": "carbon_dioxide",
+                #"device_class": "carbon_dioxide",
                 "async_add_devices": async_add_entities,
             }
             entites.append(Loxonesensor(**air_quality))
@@ -127,7 +127,7 @@ async def async_setup_entry(
                 "cat": fan.get("cat", ""),
                 "name": fan["name"] + " - Temperature",
                 "details": {"format": "%.1f°"},
-                "device_class": "temperature",
+                #S"device_class": "temperature",
                 "async_add_devices": async_add_entities,
             }
             entites.append(Loxonesensor(**temperature))
