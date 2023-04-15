@@ -129,7 +129,7 @@ async def async_setup_entry(
                 "room": fan.get("room", ""),
                 "cat": fan.get("cat", ""),
                 "name": fan["name"] + " - Temperature",
-                "details": {"format": "%.1fC"},
+                "details": {"format": "%.1f°C"},
                 "native_unit_of_measurement": UnitOfTemperature.CELSIUS,
                 #"device_class": "temperature",
                 "async_add_devices": async_add_entities,
