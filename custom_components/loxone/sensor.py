@@ -430,6 +430,11 @@ class Loxonesensor(LoxoneEntity, SensorEntity):
                 "suggested_area": self.room,
             }
 
-    @self._attr_native_unit_of_measurement.setter
+    @property
+    def native_unit_of_measurement(self):
+        """Return the unit of measurement."""
+        return self._attr_native_unit_of_measurement
+
+    @native_unit_of_measurement.setter
     def native_unit_of_measurement(self, value):
         self._attr_native_unit_of_measurement = value
