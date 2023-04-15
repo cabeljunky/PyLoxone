@@ -9,7 +9,8 @@ from homeassistant.components.fan import (
     FanEntity,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import STATE_UNKNOWN
+from homeassistant.const import (STATE_UNKNOWN,
+                                 UnitOfTemperature, CONCENTRATION_PARTS_PER_MILLION, PERCENTAGE)
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.typing import ConfigType, DiscoveryInfoType
@@ -82,11 +83,12 @@ async def async_setup_entry(
             humidity = {
                 "parent_id": fan["uuidAction"],
                 "uuidAction": fan["states"]["humidityIndoor"],
-                "typ": "humidity",
+                "typ": "analog",
                 "room": fan.get("room", ""),
                 "cat": fan.get("cat", ""),
                 "name": fan["name"] + " - Humidity",
                 "details": {"format": "%.1f%"},
+                "unit_of_measurement": PERCENTAGE,
                 #"device_class": "humidity",
                 "async_add_devices": async_add_entities,
             }
@@ -95,11 +97,12 @@ async def async_setup_entry(
             air_quality = {
                 "parent_id": fan["uuidAction"],
                 "uuidAction": fan["states"]["airQualityIndoor"],
-                "typ": "carbon_dioxide",
+                "typ": "analog",
                 "room": fan.get("room", ""),
                 "cat": fan.get("cat", ""),
                 "name": fan["name"] + " - Air Quality",
                 "details": {"format": "%.1fppm"},
+                "unit_of_measurement": CONCENTRATION_PARTS_PER_MILLION,
                 #"device_class": "carbon_dioxide",
                 "async_add_devices": async_add_entities,
             }
@@ -122,12 +125,13 @@ async def async_setup_entry(
             temperature = {
                 "parent_id": fan["uuidAction"],
                 "uuidAction": fan["states"]["temperatureOutdoor"],
-                "typ": "temperature",
+                "typ": "analog",
                 "room": fan.get("room", ""),
                 "cat": fan.get("cat", ""),
                 "name": fan["name"] + " - Temperature",
                 "details": {"format": "%.1f°"},
-                #S"device_class": "temperature",
+                "unit_of_measurement": UnitOfTemperature.CELSIUS,
+                #"device_class": "temperature",
                 "async_add_devices": async_add_entities,
             }
             entites.append(Loxonesensor(**temperature))
@@ -234,13 +238,9 @@ class LoxoneVentilation(LoxoneEntity, FanEntity):
     @device_class.setter
     def device_class(self, device_class):
         if not hasattr(self, "_device_class"):
-            try:
-                setattr(self, "_device_class", device_class)
-            except AttributeError:
-                _LOGGER.error(f"Could set {key} for {self._name}")
+            setattr(self, "_device_class", device_class)
         else:
             self._device_class = device_class
-
 
     def get_state_value(self, name):
         uuid = self._stateAttribUuids[name]

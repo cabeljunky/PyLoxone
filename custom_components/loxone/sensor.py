@@ -22,7 +22,7 @@ from homeassistant.const import (CONF_DEVICE_CLASS, CONF_NAME,
                                  SPEED_KILOMETERS_PER_HOUR, STATE_UNKNOWN,
                                  TEMP_CELSIUS, TEMP_FAHRENHEIT, UnitOfEnergy,
                                  UnitOfPower, UnitOfPrecipitationDepth,
-                                 UnitOfSpeed, UnitOfTemperature)
+                                 UnitOfSpeed, UnitOfTemperature, CONCENTRATION_PARTS_PER_MILLION, PERCENTAGE)
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -124,6 +124,22 @@ SENSOR_TYPES: tuple[LoxoneEntityDescription, ...] = (
         native_unit_of_measurement=LIGHT_LUX,
         state_class=SensorStateClass.MEASUREMENT,
         device_class=SensorDeviceClass.ILLUMINANCE,
+    ),
+    LoxoneEntityDescription(
+        key="co2",
+        name="CO2",
+        loxone_format_string=CONCENTRATION_PARTS_PER_MILLION,
+        native_unit_of_measurement=CONCENTRATION_PARTS_PER_MILLION,
+        state_class=SensorStateClass.MEASUREMENT,
+        device_class=SensorDeviceClass.CO2,
+    ),
+    LoxoneEntityDescription(
+        key="humidity",
+        name="Humidity",
+        loxone_format_string=PERCENTAGE,
+        native_unit_of_measurement=PERCENTAGE,
+        state_class=SensorStateClass.MEASUREMENT,
+        device_class=SensorDeviceClass.HUMIDITY,
     ),
 )
 
@@ -359,7 +375,7 @@ class Loxonesensor(LoxoneEntity, SensorEntity):
         self._attr_native_unit_of_measurement = self._clean_unit(self.details["format"])
         self._parent_id = kwargs.get("parent_id", None)
 
-        if entity_description := self._get_entity_description():
+            if entity_description := self._get_entity_description():
             self.entity_description = entity_description
 
     def _get_entity_description(self) -> SensorEntityDescription | None:
