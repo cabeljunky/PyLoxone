@@ -82,7 +82,7 @@ async def async_setup_entry(
             humidity = {
                 "parent_id": fan["uuidAction"],
                 "uuidAction": fan["states"]["humidityIndoor"],
-                "typ": "analog",
+                "typ": "humidity",
                 "room": fan.get("room", ""),
                 "cat": fan.get("cat", ""),
                 "name": fan["name"] + " - Humidity",
@@ -95,7 +95,7 @@ async def async_setup_entry(
             air_quality = {
                 "parent_id": fan["uuidAction"],
                 "uuidAction": fan["states"]["airQualityIndoor"],
-                "typ": "analog",
+                "typ": "carbon_dioxide",
                 "room": fan.get("room", ""),
                 "cat": fan.get("cat", ""),
                 "name": fan["name"] + " - Air Quality",
@@ -122,7 +122,7 @@ async def async_setup_entry(
             temperature = {
                 "parent_id": fan["uuidAction"],
                 "uuidAction": fan["states"]["temperatureOutdoor"],
-                "typ": "analog",
+                "typ": "temperature",
                 "room": fan.get("room", ""),
                 "cat": fan.get("cat", ""),
                 "name": fan["name"] + " - Temperature",
@@ -234,9 +234,13 @@ class LoxoneVentilation(LoxoneEntity, FanEntity):
     @device_class.setter
     def device_class(self, device_class):
         if not hasattr(self, "_device_class"):
-            setattr(self, "_device_class", device_class)
+            try:
+                setattr(self, "_device_class", device_class)
+            except AttributeError:
+                _LOGGER.error(f"Could set {key} for {self._name}")
         else:
             self._device_class = device_class
+
 
     def get_state_value(self, name):
         uuid = self._stateAttribUuids[name]
