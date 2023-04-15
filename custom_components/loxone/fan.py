@@ -88,7 +88,6 @@ async def async_setup_entry(
                 "cat": fan.get("cat", ""),
                 "name": fan["name"] + " - Humidity",
                 "details": {"format": "%.1f%"},
-                "native_unit_of_measurement": PERCENTAGE,
                 #"device_class": "humidity",
                 "async_add_devices": async_add_entities,
             }
@@ -102,7 +101,6 @@ async def async_setup_entry(
                 "cat": fan.get("cat", ""),
                 "name": fan["name"] + " - Air Quality",
                 "details": {"format": "%.1fppm"},
-                "native_unit_of_measurement": CONCENTRATION_PARTS_PER_MILLION,
                 #"device_class": "carbon_dioxide",
                 "async_add_devices": async_add_entities,
             }
@@ -130,7 +128,6 @@ async def async_setup_entry(
                 "cat": fan.get("cat", ""),
                 "name": fan["name"] + " - Temperature",
                 "details": {"format": "%.1f°"},
-                "native_unit_of_measurement": UnitOfTemperature.CELSIUS,
                 #"device_class": "temperature",
                 "async_add_devices": async_add_entities,
             }
@@ -149,7 +146,7 @@ class LoxoneVentilation(LoxoneEntity, FanEntity):
         LoxoneEntity.__init__(self, **kwargs)
 
         self._state = STATE_UNKNOWN
-        self._format = self._get_format(kwargs.get("details", {}).get("format", ""))
+        self._format = self._get_format(self.details["format"])
         self._attr_available = True
 
         self._stateAttribUuids = kwargs["states"]
