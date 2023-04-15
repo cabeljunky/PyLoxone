@@ -88,7 +88,7 @@ async def async_setup_entry(
                 "cat": fan.get("cat", ""),
                 "name": fan["name"] + " - Humidity",
                 "details": {"format": "%.1f%"},
-                "unit_of_measurement": PERCENTAGE,
+                "native_unit_of_measurement": PERCENTAGE,
                 #"device_class": "humidity",
                 "async_add_devices": async_add_entities,
             }
@@ -102,7 +102,7 @@ async def async_setup_entry(
                 "cat": fan.get("cat", ""),
                 "name": fan["name"] + " - Air Quality",
                 "details": {"format": "%.1fppm"},
-                "unit_of_measurement": CONCENTRATION_PARTS_PER_MILLION,
+                "native_unit_of_measurement": CONCENTRATION_PARTS_PER_MILLION,
                 #"device_class": "carbon_dioxide",
                 "async_add_devices": async_add_entities,
             }
@@ -130,7 +130,7 @@ async def async_setup_entry(
                 "cat": fan.get("cat", ""),
                 "name": fan["name"] + " - Temperature",
                 "details": {"format": "%.1f°"},
-                "unit_of_measurement": UnitOfTemperature.CELSIUS,
+                "native_unit_of_measurement": UnitOfTemperature.CELSIUS,
                 #"device_class": "temperature",
                 "async_add_devices": async_add_entities,
             }
