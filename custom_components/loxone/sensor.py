@@ -375,7 +375,7 @@ class Loxonesensor(LoxoneEntity, SensorEntity):
         self._attr_native_unit_of_measurement = self._clean_unit(self.details["format"])
         self._parent_id = kwargs.get("parent_id", None)
 
-            if entity_description := self._get_entity_description():
+        if entity_description := self._get_entity_description():
             self.entity_description = entity_description
 
     def _get_entity_description(self) -> SensorEntityDescription | None:
