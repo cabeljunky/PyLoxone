@@ -103,7 +103,7 @@ cfmt = """\
 (?:\d+|\*)?                        # width
 (?:\.(?:\d+|\*))?                  # precision
 (?:h|l|ll|w|I|I32|I64)?            # size
-[cCdiouxXeEfgGaAnpsSZ]             # type
+[aAbBcCdeEfgGiJkKnmMopPsTuxXSZ\.°⋅²³/µ\%]{0,4}             # type
 ) |                                # OR
 %%) 
 """
