@@ -25,6 +25,7 @@ from homeassistant.const import (CONF_DEVICE_CLASS, CONF_NAME,
                                  UnitOfSpeed, UnitOfTemperature, CONCENTRATION_PARTS_PER_MILLION, PERCENTAGE)
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
+from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.typing import ConfigType, DiscoveryInfoType
 
@@ -236,7 +237,7 @@ class LoxoneCustomSensor(LoxoneEntity, SensorEntity):
         else:
             self._state_class = None
 
-        self._state = STATE_UNKNOWN
+        self._state = None
 
     async def event_handler(self, e):
         if self.uuidAction in e.data:
@@ -378,6 +379,18 @@ class Loxonesensor(LoxoneEntity, SensorEntity):
         if entity_description := self._get_entity_description():
             self.entity_description = entity_description
 
+        _uuid = self.unique_id
+        if self._parent_id:
+            _uuid = self._parent_id
+
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, _uuid)},
+            name=f"{DOMAIN} {self.name}",
+            manufacturer="Loxone",
+            suggested_area=self.room,
+            model="Sensor analog"
+        )
+
     def _get_entity_description(self) -> SensorEntityDescription | None:
         """Return the sensor entity description."""
         if self._attr_native_unit_of_measurement in SENSOR_FORMATS:
@@ -415,17 +428,3 @@ class Loxonesensor(LoxoneEntity, SensorEntity):
             "category": self.cat,
         }
 
-    @property
-    def device_info(self):
-        _uuid = self.unique_id
-
-        if self._parent_id:
-            _uuid = self._parent_id
-            return {
-                "identifiers": {(DOMAIN, _uuid)},
-                "name": self.name,
-                "manufacturer": "Loxone",
-                "model": "Sensor analog",
-                "uuid": self.uuidAction,
-                "suggested_area": self.room,
-            }

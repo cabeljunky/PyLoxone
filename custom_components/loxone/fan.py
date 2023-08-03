@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import logging
+
+from homeassistant.helpers.entity import DeviceInfo
 from voluptuous import Optional, Any
 from homeassistant.components.fan import (
     SUPPORT_PRESET_MODE,
@@ -64,6 +66,7 @@ async def async_setup_entry(
                 "room": get_room_name_from_room_uuid(loxconfig, fan.get("room", "")),
                 "cat": get_cat_name_from_cat_uuid(loxconfig, fan.get("cat", "")),
                 "async_add_devices": async_add_entities,
+                "config_entry": config_entry,
             }
         )
 
@@ -77,6 +80,7 @@ async def async_setup_entry(
                 "name": fan["name"] + " - Presence",
                 "device_class": "presence",
                 "async_add_devices": async_add_entities,
+                "config_entry": config_entry,
             }
             entites.append(LoxoneDigitalSensor(**presence))
         if fan["details"]["hasIndoorHumidity"] and "humidityIndoor" in fan["states"]:
@@ -91,6 +95,7 @@ async def async_setup_entry(
                 "native_unit_of_measurement": PERCENTAGE,
                 #"device_class": "humidity",
                 "async_add_devices": async_add_entities,
+                "config_entry": config_entry,
             }
             entites.append(Loxonesensor(**humidity))
         if fan["details"]["hasAirQuality"] and "airQualityIndoor" in fan["states"]:
@@ -105,6 +110,7 @@ async def async_setup_entry(
                 "native_unit_of_measurement": CONCENTRATION_PARTS_PER_MILLION,
                 #"device_class": "carbon_dioxide",
                 "async_add_devices": async_add_entities,
+                "config_entry": config_entry,
             }
             entites.append(Loxonesensor(**air_quality))
         # if "temperatureIndoor" in fan["states"]:
@@ -133,6 +139,7 @@ async def async_setup_entry(
                 "native_unit_of_measurement": UnitOfTemperature.CELSIUS,
                 #"device_class": "temperature",
                 "async_add_devices": async_add_entities,
+                "config_entry": config_entry,
             }
             entites.append(Loxonesensor(**temperature))
 
@@ -148,6 +155,7 @@ class LoxoneVentilation(LoxoneEntity, FanEntity):
         """Initialize the fan."""
         LoxoneEntity.__init__(self, **kwargs)
 
+        self._device_class = None
         self._state = STATE_UNKNOWN
         self._format = self._get_format(kwargs.get("details", {}).get("format", ""))
         self._attr_available = True
@@ -155,6 +163,14 @@ class LoxoneVentilation(LoxoneEntity, FanEntity):
         self._stateAttribUuids = kwargs["states"]
         self._stateAttribValues = {}
         self._details = kwargs["details"]
+
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, self.unique_id)},
+            name=f"{DOMAIN} {self.name}",
+            manufacturer="Loxone",
+            suggested_area=self.room,
+            model="Fan",
+        )
 
     @property
     def extra_state_attributes(self):
@@ -168,16 +184,6 @@ class LoxoneVentilation(LoxoneEntity, FanEntity):
             "category": self.cat,
             "device_typ": self.type,
             "platform": "loxone",
-        }
-
-    @property
-    def device_info(self):
-        return {
-            "identifiers": {(DOMAIN, self.unique_id)},
-            "name": self.name,
-            "manufacturer": "Loxone",
-            "model": self.type,
-            "suggested_area": self.room,
         }
 
     @property
