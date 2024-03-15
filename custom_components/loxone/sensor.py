@@ -480,18 +480,9 @@ class Loxonesensor(LoxoneEntity, SensorEntity):
 
         Implemented by platform classes.
         """
-        if self._from_loxone_config:
-            return {
-                "uuid": self.uuidAction,
-                "room": self.room,
-                "category": self.cat,
-                "device_typ": self.type,
-                "platform": "loxone",
-            }
-        else:
-            return {
-                "uuid": self.uuidAction,
-                "device_typ": self.typ + "_sensor",
-                "platform": "loxone",
-                "category": self.cat,
-            }
+        return {
+            "uuid": self.uuidAction,
+            "device_typ": self.typ + "_sensor",
+            "platform": "loxone",
+            "category": self.cat,
+        }
