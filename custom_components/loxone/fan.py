@@ -3,19 +3,17 @@ from __future__ import annotations
 
 import logging
 
-from homeassistant.helpers.entity import DeviceInfo
-from voluptuous import Optional, Any
 from homeassistant.components.fan import (
-    SUPPORT_PRESET_MODE,
-    SUPPORT_SET_SPEED,
     FanEntity,
+    FanEntityFeature,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import (STATE_UNKNOWN,
-                                 UnitOfTemperature, CONCENTRATION_PARTS_PER_MILLION, PERCENTAGE)
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.const import STATE_UNKNOWN
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.typing import ConfigType, DiscoveryInfoType
+from voluptuous import Any, Optional
 
 from . import LoxoneEntity
 from .binary_sensor import LoxoneDigitalSensor
@@ -92,8 +90,7 @@ async def async_setup_entry(
                 "cat": fan.get("cat", ""),
                 "name": fan["name"] + " - Humidity",
                 "details": {"format": "%.1f%"},
-                "native_unit_of_measurement": PERCENTAGE,
-                #"device_class": "humidity",
+                "device_class": "humidity",
                 "async_add_devices": async_add_entities,
                 "config_entry": config_entry,
             }
@@ -107,8 +104,7 @@ async def async_setup_entry(
                 "cat": fan.get("cat", ""),
                 "name": fan["name"] + " - Air Quality",
                 "details": {"format": "%.1fppm"},
-                "native_unit_of_measurement": CONCENTRATION_PARTS_PER_MILLION,
-                #"device_class": "carbon_dioxide",
+                "device_class": "carbon_dioxide",
                 "async_add_devices": async_add_entities,
                 "config_entry": config_entry,
             }
@@ -136,8 +132,7 @@ async def async_setup_entry(
                 "cat": fan.get("cat", ""),
                 "name": fan["name"] + " - Temperature",
                 "details": {"format": "%.1f°C"},
-                "native_unit_of_measurement": UnitOfTemperature.CELSIUS,
-                #"device_class": "temperature",
+                "device_class": "temperature",
                 "async_add_devices": async_add_entities,
                 "config_entry": config_entry,
             }

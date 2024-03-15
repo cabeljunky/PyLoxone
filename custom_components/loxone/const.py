@@ -18,6 +18,8 @@ LOXONE_PLATFORMS: Final[list[Platform]] = [
     Platform.LIGHT,
     Platform.CLIMATE,
     Platform.ALARM_CONTROL_PANEL,
+    Platform.MEDIA_PLAYER,
+    Platform.NUMBER
 ]
 
 LOXONE_DEFAULT_PORT = 8080
@@ -74,6 +76,7 @@ ATTR_UUID = "uuid"
 ATTR_VALUE = "value"
 ATTR_CODE = "code"
 ATTR_COMMAND = "command"
+ATTR_DEVICE = "device"
 ATTR_AREA_CREATE = "create_areas"
 DOMAIN_DEVICES = "devices"
 
@@ -83,17 +86,19 @@ CONF_SCENE_GEN_DELAY = "generate_scenes_delay"
 CONF_LIGHTCONTROLLER_SUBCONTROLS_GEN = "generate_lightcontroller_subcontrols"
 DEFAULT_FORCE_UPDATE = False
 
-SUPPORT_SET_POSITION = 4
-SUPPORT_STOP = 8
-SUPPORT_OPEN_TILT = 16
-SUPPORT_CLOSE_TILT = 32
-SUPPORT_STOP_TILT = 64
-SUPPORT_SET_TILT_POSITION = 128
+SUPPORT_SUN_AUTOMATION = 1024
+SUPPORT_QUICK_SHADE = 2048
+
+SERVICE_ENABLE_SUN_AUTOMATION = "enable_sun_automation"
+SERVICE_DISABLE_SUN_AUTOMATION = "disable_sun_automation"
+SERVICE_QUICK_SHADE = "quick_shade"
 
 CONF_HVAC_AUTO_MODE = "hvac_auto_mode"
 
 STATE_ON = "on"
 STATE_OFF = "off"
+
+DEFAULT_AUDIO_ZONE_V2_PLAY_STATE = -1
 
 cfmt = """\
 (                                  # start of capture group 1

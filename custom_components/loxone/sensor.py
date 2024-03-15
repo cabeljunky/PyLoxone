@@ -5,24 +5,34 @@ For more details about this component, please refer to the documentation at
 https://github.com/JoDehli/PyLoxone
 """
 import logging
+import re
 from dataclasses import dataclass
 
 import homeassistant.helpers.config_validation as cv
 import voluptuous as vol
-from homeassistant.components.sensor import (PLATFORM_SCHEMA,
-                                             SensorDeviceClass, SensorEntity,
-                                             SensorEntityDescription,
-                                             SensorStateClass)
+from homeassistant.components.sensor import (
+    CONF_STATE_CLASS,
+    PLATFORM_SCHEMA,
+    SensorDeviceClass,
+    SensorEntity,
+    SensorEntityDescription,
+    SensorStateClass,
+)
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import (CONF_DEVICE_CLASS, CONF_NAME,
-                                 CONF_UNIT_OF_MEASUREMENT, CONF_VALUE_TEMPLATE,
-                                 ENERGY_KILO_WATT_HOUR, ENERGY_WATT_HOUR,
-                                 LIGHT_LUX, PERCENTAGE, POWER_WATT,
-                                 PRECIPITATION_MILLIMETERS,
-                                 SPEED_KILOMETERS_PER_HOUR, STATE_UNKNOWN,
-                                 TEMP_CELSIUS, TEMP_FAHRENHEIT, UnitOfEnergy,
-                                 UnitOfPower, UnitOfPrecipitationDepth,
-                                 UnitOfSpeed, UnitOfTemperature, CONCENTRATION_PARTS_PER_MILLION, PERCENTAGE)
+from homeassistant.const import (
+    CONF_DEVICE_CLASS,
+    CONF_NAME,
+    CONF_UNIT_OF_MEASUREMENT,
+    CONF_VALUE_TEMPLATE,
+    LIGHT_LUX,
+    STATE_UNKNOWN,
+    UnitOfEnergy,
+    UnitOfPower,
+    UnitOfSpeed,
+    UnitOfTemperature,
+    CONCENTRATION_PARTS_PER_MILLION, 
+    PERCENTAGE
+)
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity import DeviceInfo
@@ -31,8 +41,7 @@ from homeassistant.helpers.typing import ConfigType, DiscoveryInfoType
 
 from . import LoxoneEntity
 from .const import CONF_ACTIONID, DOMAIN, SENDDOMAIN
-from .helpers import (get_all, get_cat_name_from_cat_uuid,
-                      get_room_name_from_room_uuid)
+from .helpers import add_room_and_cat_to_value_values, get_all
 from .miniserver import get_miniserver_from_hass
 
 NEW_SENSOR = "sensors"
@@ -73,7 +82,8 @@ SENSOR_TYPES: tuple[LoxoneEntityDescription, ...] = (
     LoxoneEntityDescription(
         key="temperature",
         name="Temperature",
-        loxone_format_string=TEMP_CELSIUS,
+        suggested_display_precision=1,
+        loxone_format_string=UnitOfTemperature.CELSIUS,
         native_unit_of_measurement=UnitOfTemperature.CELSIUS,
         state_class=SensorStateClass.MEASUREMENT,
         device_class=SensorDeviceClass.TEMPERATURE,
@@ -81,7 +91,8 @@ SENSOR_TYPES: tuple[LoxoneEntityDescription, ...] = (
     LoxoneEntityDescription(
         key="temperature_fahrenheit",
         name="Temperature",
-        loxone_format_string=TEMP_FAHRENHEIT,
+        suggested_display_precision=1,
+        loxone_format_string=UnitOfTemperature.FAHRENHEIT,
         native_unit_of_measurement=UnitOfTemperature.FAHRENHEIT,
         state_class=SensorStateClass.MEASUREMENT,
         device_class=SensorDeviceClass.TEMPERATURE,
@@ -89,7 +100,8 @@ SENSOR_TYPES: tuple[LoxoneEntityDescription, ...] = (
     LoxoneEntityDescription(
         key="windstrength",
         name="Wind Strength",
-        loxone_format_string=SPEED_KILOMETERS_PER_HOUR,
+        suggested_display_precision=1,
+        loxone_format_string=UnitOfSpeed.KILOMETERS_PER_HOUR,
         native_unit_of_measurement=UnitOfSpeed.KILOMETERS_PER_HOUR,
         state_class=SensorStateClass.MEASUREMENT,
         device_class=SensorDeviceClass.WIND_SPEED,
@@ -97,7 +109,8 @@ SENSOR_TYPES: tuple[LoxoneEntityDescription, ...] = (
     LoxoneEntityDescription(
         key="kwh",
         name="Kilowatt per hour",
-        loxone_format_string=ENERGY_KILO_WATT_HOUR,
+        suggested_display_precision=1,
+        loxone_format_string=UnitOfEnergy.KILO_WATT_HOUR,
         native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
         state_class=SensorStateClass.TOTAL_INCREASING,
         device_class=SensorDeviceClass.ENERGY,
@@ -105,7 +118,8 @@ SENSOR_TYPES: tuple[LoxoneEntityDescription, ...] = (
     LoxoneEntityDescription(
         key="wh",
         name="Watt per hour",
-        loxone_format_string=ENERGY_WATT_HOUR,
+        suggested_display_precision=1,
+        loxone_format_string=UnitOfEnergy.WATT_HOUR,
         native_unit_of_measurement=UnitOfEnergy.WATT_HOUR,
         state_class=SensorStateClass.TOTAL_INCREASING,
         device_class=SensorDeviceClass.ENERGY,
@@ -113,7 +127,8 @@ SENSOR_TYPES: tuple[LoxoneEntityDescription, ...] = (
     LoxoneEntityDescription(
         key="power",
         name="Watt",
-        loxone_format_string=POWER_WATT,
+        suggested_display_precision=1,
+        loxone_format_string=UnitOfPower.WATT,
         native_unit_of_measurement=UnitOfPower.WATT,
         state_class=SensorStateClass.MEASUREMENT,
         device_class=SensorDeviceClass.POWER,
@@ -182,24 +197,12 @@ async def async_setup_entry(
         sensors.append(LoxoneVersionSensor(loxconfig["softwareVersion"]))
 
     for sensor in get_all(loxconfig, "InfoOnlyAnalog"):
-        sensor.update(
-            {
-                "typ": "analog",
-                "room": get_room_name_from_room_uuid(loxconfig, sensor.get("room", "")),
-                "cat": get_cat_name_from_cat_uuid(loxconfig, sensor.get("cat", "")),
-            }
-        )
-
+        sensor = add_room_and_cat_to_value_values(loxconfig, sensor)
+        sensor.update({"typ": "analog"})
         sensors.append(Loxonesensor(**sensor))
 
     for sensor in get_all(loxconfig, "TextInput"):
-        sensor.update(
-            {
-                "room": get_room_name_from_room_uuid(loxconfig, sensor.get("room", "")),
-                "cat": get_cat_name_from_cat_uuid(loxconfig, sensor.get("cat", "")),
-            }
-        )
-
+        sensor = add_room_and_cat_to_value_values(loxconfig, sensor)
         sensors.append(LoxoneTextSensor(**sensor))
 
     @callback
@@ -217,6 +220,7 @@ async def async_setup_entry(
 
 class LoxoneCustomSensor(LoxoneEntity, SensorEntity):
     def __init__(self, **kwargs):
+        LoxoneEntity().__init__(**kwargs)
         self._name = kwargs["name"]
         if "uuidAction" in kwargs:
             self.uuidAction = kwargs["uuidAction"]
@@ -378,6 +382,26 @@ class Loxonesensor(LoxoneEntity, SensorEntity):
 
         if entity_description := self._get_entity_description():
             self.entity_description = entity_description
+        else:
+
+            def parse_digits_after_decimal(format_string):
+                # Define a regular expression pattern to match digits after the decimal point
+                pattern = r"\.(\d+)"
+
+                # Use re.search to find the first match in the format string
+                match = re.search(pattern, format_string)
+
+                if match:
+                    # Extract the digits part and convert it to an integer
+                    digits = int(match.group(1))
+                    return digits
+                else:
+                    # Return a default value or raise an error if no match is found
+                    return None  # or raise an exception
+
+            precision = parse_digits_after_decimal(self.details["format"])
+            if precision:
+                self._attr_suggested_display_precision = precision
 
         _uuid = self.unique_id
         if self._parent_id:
@@ -427,4 +451,3 @@ class Loxonesensor(LoxoneEntity, SensorEntity):
             "platform": "loxone",
             "category": self.cat,
         }
-

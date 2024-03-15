@@ -16,7 +16,8 @@ from homeassistant.helpers.typing import ConfigType, DiscoveryInfoType
 
 from . import LoxoneEntity
 from .const import DOMAIN, SENDDOMAIN
-from .helpers import get_all, get_cat_name_from_cat_uuid, get_room_name_from_room_uuid
+from .helpers import (get_all, get_cat_name_from_cat_uuid,
+                      get_room_name_from_room_uuid)
 from .miniserver import get_miniserver_from_hass
 
 _LOGGER = logging.getLogger(__name__)
@@ -40,7 +41,7 @@ async def async_setup_entry(
     """Set up entry."""
     miniserver = get_miniserver_from_hass(hass)
     loxconfig = miniserver.lox_config.json
-    entites = []
+    entities = []
 
     for switch_entity in get_all(
         loxconfig, ["Pushbutton", "Switch", "TimedSwitch", "Intercom"]
@@ -58,7 +59,7 @@ async def async_setup_entry(
                 }
             )
             new_push_button = LoxoneSwitch(**switch_entity)
-            entites.append(new_push_button)
+            entities.append(new_push_button)
 
         elif switch_entity["type"] == "TimedSwitch":
             switch_entity.update(
@@ -73,7 +74,7 @@ async def async_setup_entry(
                 }
             )
             new_push_button = LoxoneTimedSwitch(**switch_entity)
-            entites.append(new_push_button)
+            entities.append(new_push_button)
 
         elif switch_entity["type"] == "Intercom":
             if "subControls" in switch_entity:
@@ -104,9 +105,9 @@ async def async_setup_entry(
                     _.update({"config_entry": config_entry})
 
                     new_push_button = LoxoneIntercomSubControl(**_)
-                    entites.append(new_push_button)
+                    entities.append(new_push_button)
 
-    async_add_entities(entites)
+    async_add_entities(entities)
 
 
 class LoxoneTimedSwitch(LoxoneEntity, SwitchEntity):
@@ -135,7 +136,7 @@ class LoxoneTimedSwitch(LoxoneEntity, SwitchEntity):
             name=f"{DOMAIN} {self.name}",
             manufacturer="Loxone",
             suggested_area=self.room,
-            model=self.type
+            model=self.type,
         )
 
     @property
@@ -166,7 +167,7 @@ class LoxoneTimedSwitch(LoxoneEntity, SwitchEntity):
 
     def turn_off(self, **kwargs):
         """Turn the device off."""
-        self.hass.bus.async_fire(SENDDOMAIN, dict(uuid=self.uuidAction, value="pulse"))
+        self.hass.bus.async_fire(SENDDOMAIN, dict(uuid=self.uuidAction, value="off"))
         self._state = False
         self.schedule_update_ha_state()
 

@@ -6,13 +6,14 @@
   "requirements": [
     "websockets",
     "pycryptodome",
-    "numpy"
+    "numpy",
+    "httpx"
   ],
   "dependencies": [],
   "codeowners": ["JoDehli"],
   "iot_class": "local_polling",
-  "homeassistant": "2023.3.0",
+  "homeassistant": "2024.02.0",
   "render_readme": true,
   "config_flow": true,
-  "version": "0.4.3"
+  "version": "0.6.3"
 }

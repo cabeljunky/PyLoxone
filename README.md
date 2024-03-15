@@ -11,15 +11,11 @@ Home Assistant binding for Loxone.
 A special thanks to Pawel Pieczul from the great openhab2 house automation software. 
 He really helped me a lot to with the new token based authentification. Thanks Pawel!!!
 
-#### This release works for the version 0.103.0 and newer!!
+#### This release works for the version 2024.1.0 and newer!!
 
 
 ## Config for the gen2 miniserver
-If you have the gen2 miniserver you must use your loxonecloud address. You can find out your address in
-the LoxoneConifg software. You need your serial number. You also need to forward your ports correctly. 
-Here is an example config:
-
-![alt text](cloud_config.png)
+If you have the gen2 miniserver you must connect via local access. All cloud connections are not working at the moment.
 
 ## Manual installation
 1. Download the zip file and extract all files.
@@ -38,9 +34,28 @@ Here is an example config:
 6. Add the Intgration and fill out all required fields
 7. Restart Home-Assitant
 
+## Log Configuration
+Use the following settings if you paste a log into a issue:
 
-## Configuration over yaml (deprecated)
-Not supported anymore.
+```yaml
+logger:
+  default: warning
+  logs:
+    homeassistant: warning
+    homeassistant.helpers: warning
+    custom_components.loxone: debug
+    custom_components.loxone.api: debug
+```
+
+## Recorder Configuration
+A Loxone system generates a few thousand events per day. These events are recorded in your homeassistant and the database file can grow a lot per day. It is recommended to exclude loxone events from the recorder using the following settings:
+
+```yaml
+recorder:
+  exclude:
+    event_types:
+      - loxone_event
+```
 
 ## Websocket direct command
 Send command direct to the loxone for example a pulse event to a switch:
@@ -51,6 +66,8 @@ Send command direct to the loxone for example a pulse event to a switch:
 "value":"pulse"
 }
 ```
+You can choose to send the commands using the UUID or the entity-name. See Developer Tools -> Services for more details.
+Websocket direct commands enable you to, for example, send data captured by devices integrated in Home Assistant immediately to the miniserver using a VI on the miniserver.
 
 ## Supported Loxone Entites
 - InfoOnlyAnalog and InfoOnlyDigital
@@ -61,6 +78,8 @@ Send command direct to the loxone for example a pulse event to a switch:
 - Alarm
 - Fan (thanks for the implementation [cabeljunky](https://github.com/cabeljunky) )
 - RoomControllerV2 (thanks for the implementation [ztamas83](https://github.com/ztamas83) )
+- AudioZoneV2 (thanks for the implementation [lukaskroczek](https://github.com/lukaskroczek) )
+- Slider (thanks for the implementation [gigatexel](https://github.com/gigatexel) )
 
 ### If your Device is not supported
 You can integrate nearly every Loxone Entity in your Home-Assistent System by adding a custom sensor to your yaml file. 
