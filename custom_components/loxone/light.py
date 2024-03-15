@@ -8,18 +8,15 @@ from homeassistant.components.light import (
     ATTR_COLOR_TEMP,
     ATTR_EFFECT,
     ATTR_HS_COLOR,
-    COLOR_MODE_COLOR_TEMP,
-    COLOR_MODE_HS,
-    SUPPORT_BRIGHTNESS,
-    SUPPORT_COLOR,
-    SUPPORT_COLOR_TEMP,
-    SUPPORT_EFFECT,
     LightEntity,
     ToggleEntity,
+    LightEntityFeature,
+    ColorMode,
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import STATE_UNKNOWN
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.typing import ConfigType, DiscoveryInfoType
 
@@ -156,6 +153,7 @@ async def async_setup_entry(
                         loxconfig, light_controller.get("cat", "")
                     ),
                     "async_add_devices": async_add_entities,
+                    "config_entry": config_entry,
                 }
             )
         else:
@@ -166,6 +164,7 @@ async def async_setup_entry(
                     ),
                     "cat": get_cat_name_from_cat_uuid(loxconfig, dimmer.get("cat", "")),
                     "async_add_devices": async_add_entities,
+                    "config_entry": config_entry,
                 }
             )
 
@@ -182,6 +181,7 @@ async def async_setup_entry(
                     loxconfig, light_controller.get("cat", "")
                 ),
                 "async_add_devices": async_add_entities,
+                "config_entry": config_entry,
             }
         )
         new_switch = LoxoneLight(**switch)
@@ -197,6 +197,7 @@ async def async_setup_entry(
                     loxconfig, light_controller.get("cat", "")
                 ),
                 "async_add_devices": async_add_entities,
+                "config_entry": config_entry,
             }
         )
         new_color_picker = LoxoneColorPickerV2(**color_picker)
@@ -219,7 +220,7 @@ class LoxonelightcontrollerV2(LoxoneEntity, LightEntity):
         self.kwargs = kwargs
         self._uuid_dict = {}
 
-        self._features = SUPPORT_EFFECT
+        self._features = LightEntityFeature.EFFECT
         from collections import OrderedDict
 
         self._sub_controls = OrderedDict({})
@@ -229,19 +230,17 @@ class LoxonelightcontrollerV2(LoxoneEntity, LightEntity):
                 "type": control["type"],
             }
 
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, self.unique_id)},
+            name=f"{DOMAIN} {self.name}",
+            manufacturer="Loxone",
+            suggested_area=self.room,
+            model="LightControllerV2",
+        )
+
     @property
     def supported_features(self):
         return self._features
-
-    @property
-    def device_info(self):
-        return {
-            "identifiers": {(DOMAIN, self.unique_id)},
-            "name": self.name,
-            "manufacturer": "Loxone",
-            "model": "LightControllerV2",
-            "suggested_area": self.room,
-        }
 
     @property
     def device_class(self):
@@ -328,12 +327,14 @@ class LoxonelightcontrollerV2(LoxoneEntity, LightEntity):
         elif kwargs == {}:
             if self.state == STATE_OFF:
                 self.hass.bus.async_fire(
-                    SENDDOMAIN, dict(uuid=self.uuidAction, value="plus")
+                    SENDDOMAIN, dict(uuid=self.uuidAction, value="changeTo/99")
                 )
         self.async_schedule_update_ha_state()
 
     async def async_turn_off(self, **kwargs) -> None:
-        self.hass.bus.async_fire(SENDDOMAIN, dict(uuid=self.uuidAction, value="off"))
+        self.hass.bus.async_fire(
+            SENDDOMAIN, dict(uuid=self.uuidAction, value="changeTo/0")
+        )
         self.async_schedule_update_ha_state()
 
     async def event_handler(self, event):
@@ -400,33 +401,30 @@ class LoxonelightcontrollerV2(LoxoneEntity, LightEntity):
 
 class LoxoneLight(LoxoneEntity, LightEntity, ToggleEntity, ABC):
     """Representation of a light."""
+    _attr_color_mode = ColorMode.ONOFF
+    _attr_supported_color_modes = {ColorMode.ONOFF}
 
     def __init__(self, **kwargs):
         LoxoneEntity.__init__(self, **kwargs)
         self._state = STATE_UNKNOWN
         self._async_add_devices = kwargs["async_add_devices"]
         self.light_controller_id = kwargs.get("lightcontroller_id", None)
-
-    @property
-    def device_info(self):
         if self.light_controller_id:
-            return {
-                "identifiers": {(DOMAIN, self.light_controller_id)},
-                "name": self.name,
-                "manufacturer": "Loxone",
-                "model": "LightControllerV2",
-                "suggested_area": self.room,
-                "type": self.type,
-            }
+            self._attr_device_info = DeviceInfo(
+                identifiers={(DOMAIN, self.light_controller_id)},
+                name=f"{DOMAIN} {self.name}",
+                manufacturer="Loxone",
+                suggested_area=self.room,
+                model="LightControllerV2",
+            )
         else:
-            return {
-                "identifiers": {(DOMAIN, self.unique_id)},
-                "name": self.name,
-                "manufacturer": "Loxone",
-                "model": "Light",
-                "suggested_area": self.room,
-                "type": self.type,
-            }
+            self._attr_device_info = DeviceInfo(
+                identifiers={(DOMAIN, self.unique_id)},
+                name=f"{DOMAIN} {self.name}",
+                manufacturer="Loxone",
+                suggested_area=self.room,
+                model="Light",
+            )
 
     @property
     def state(self):
@@ -462,10 +460,10 @@ class LoxoneLight(LoxoneEntity, LightEntity, ToggleEntity, ABC):
             "platform": "loxone",
         }
 
-    @property
-    def supported_features(self):
-        """Flag supported features."""
-        return 0
+    # @property
+    # def supported_features(self):
+    #     """Flag supported features."""
+    #     return 0
 
     async def event_handler(self, event):
         request_update = False
@@ -479,6 +477,14 @@ class LoxoneLight(LoxoneEntity, LightEntity, ToggleEntity, ABC):
 
 
 class LoxoneColorPickerV2(LoxoneEntity, LightEntity, ABC):
+
+    # @property
+    # def supported_features(self):
+    #     return SUPPORT_BRIGHTNESS | SUPPORT_COLOR | SUPPORT_COLOR_TEMP
+
+    _attr_color_mode = ColorMode.BRIGHTNESS
+    _attr_supported_color_modes = {ColorMode.BRIGHTNESS, ColorMode.COLOR_TEMP, ColorMode.HS}
+
     def __init__(self, **kwargs):
         LoxoneEntity.__init__(self, **kwargs)
         self._async_add_devices = kwargs["async_add_devices"]
@@ -486,23 +492,22 @@ class LoxoneColorPickerV2(LoxoneEntity, LightEntity, ABC):
         self._color_temp = 0
         self._rgb_color = color_util.color_hs_to_RGB(0, 0)
         self.light_controller_id = kwargs.get("lightcontroller_id", None)
-
-    @property
-    def device_info(self):
         if self.light_controller_id:
-            return {
-                "identifiers": {(DOMAIN, self.light_controller_id)},
-                "name": self.name,
-                "manufacturer": "Loxone",
-                "model": "LightControllerV2",
-            }
+            self._attr_device_info = DeviceInfo(
+                identifiers={(DOMAIN, self.light_controller_id)},
+                name=f"{DOMAIN} {self.name}",
+                manufacturer="Loxone",
+                suggested_area=self.room,
+                model="LightControllerV2",
+            )
         else:
-            return {
-                "identifiers": {(DOMAIN, self.unique_id)},
-                "name": self.name,
-                "manufacturer": "Loxone",
-                "model": "Dimmer",
-            }
+            self._attr_device_info = DeviceInfo(
+                identifiers={(DOMAIN, self.unique_id)},
+                name=f"{DOMAIN} {self.name}",
+                manufacturer="Loxone",
+                suggested_area=self.room,
+                model="ColorPickerV2",
+            )
 
     @property
     def device_class(self):
@@ -552,7 +557,7 @@ class LoxoneColorPickerV2(LoxoneEntity, LightEntity, ABC):
                 ),
             )
         elif brightness:
-            if self._attr_color_mode == COLOR_MODE_HS:
+            if self._attr_color_mode == ColorMode.HS:
                 r, g, b = color_util.color_hs_to_RGB(self.hs_color[0], self.hs_color[1])
                 h, s, v = color_util.color_RGB_to_hsv(r, g, b)
                 self.hass.bus.async_fire(
@@ -608,7 +613,7 @@ class LoxoneColorPickerV2(LoxoneEntity, LightEntity, ABC):
                 self._color_temp = 0
                 self._rgb_color = color_util.color_hs_to_RGB(color[0], color[1])
                 self._position = color[2]
-                self._attr_color_mode = COLOR_MODE_HS
+                self._attr_color_mode = ColorMode.HS
                 request_update = True
 
             elif color.startswith("temp"):
@@ -617,7 +622,7 @@ class LoxoneColorPickerV2(LoxoneEntity, LightEntity, ABC):
                 self._rgb_color = color_util.color_hs_to_RGB(0, 0)
                 self._color_temp = to_hass_color_temp(color[1])
                 self._position = color[0]
-                self._attr_color_mode = COLOR_MODE_COLOR_TEMP
+                self._attr_color_mode = ColorMode.COLOR_TEMP
                 request_update = True
 
         if request_update:
@@ -650,38 +655,21 @@ class LoxoneColorPickerV2(LoxoneEntity, LightEntity, ABC):
     def white_value(self):
         return None
 
-    @property
-    def supported_features(self):
-        return SUPPORT_BRIGHTNESS | SUPPORT_COLOR | SUPPORT_COLOR_TEMP
-
-    @property
-    def device_info(self):
-        if self.light_controller_id:
-            return {
-                "identifiers": {(DOMAIN, self.light_controller_id)},
-                "name": self.name,
-                "manufacturer": "Loxone",
-                "type": self.type,
-                "model": "LightControllerV2",
-                "suggested_area": self.room,
-            }
-        else:
-            return {
-                "identifiers": {(DOMAIN, self.unique_id)},
-                "name": self.name,
-                "manufacturer": "Loxone",
-                "model": "ColorPickerV2",
-                "suggested_area": self.room,
-            }
+    # @property
+    # def supported_features(self):
+    #     return SUPPORT_BRIGHTNESS | SUPPORT_COLOR | SUPPORT_COLOR_TEMP
 
     @property
     def icon(self):
         """Return the sensor icon."""
         return "mdi:eyedropper-variant"
 
-
+# https://github.com/home-assistant/core/blob/0d946c62dc50f9054fd8f15e04c7fe6cd1543e3a/homeassistant/components/elkm1/light.py#L37
 class LoxoneDimmer(LoxoneEntity, LightEntity, ABC):
     """Representation of a Dimmer."""
+
+    _attr_color_mode = ColorMode.BRIGHTNESS
+    _attr_supported_color_modes = {ColorMode.BRIGHTNESS}
 
     def __init__(self, **kwargs):
         LoxoneEntity.__init__(self, **kwargs)
@@ -697,24 +685,22 @@ class LoxoneDimmer(LoxoneEntity, LightEntity, ABC):
         self._async_add_devices = kwargs["async_add_devices"]
         self.light_controller_id = kwargs.get("lightcontroller_id", None)
 
-    @property
-    def device_info(self):
         if self.light_controller_id:
-            return {
-                "identifiers": {(DOMAIN, self.light_controller_id)},
-                "name": self.name,
-                "manufacturer": "Loxone",
-                "model": "LightControllerV2",
-                "suggested_area": self.room,
-            }
+            self._attr_device_info = DeviceInfo(
+                identifiers={(DOMAIN, self.light_controller_id)},
+                name=f"{DOMAIN} {self.name}",
+                manufacturer="Loxone",
+                suggested_area=self.room,
+                model="LightControllerV2",
+            )
         else:
-            return {
-                "identifiers": {(DOMAIN, self.unique_id)},
-                "name": self.name,
-                "manufacturer": "Loxone",
-                "model": "Dimmer",
-                "suggested_area": self.room,
-            }
+            self._attr_device_info = DeviceInfo(
+                identifiers={(DOMAIN, self.unique_id)},
+                name=f"{DOMAIN} {self.name}",
+                manufacturer="Loxone",
+                suggested_area=self.room,
+                model="Dimmer",
+            )
 
     @property
     def device_class(self):
@@ -810,10 +796,6 @@ class LoxoneDimmer(LoxoneEntity, LightEntity, ABC):
             "max": self._max,
             "min": self._min,
         }
-
-    @property
-    def supported_features(self):
-        return SUPPORT_BRIGHTNESS
 
     @property
     def icon(self):

@@ -1,21 +1,14 @@
 import logging
 import traceback
 
-from homeassistant.const import CONF_HOST, CONF_PASSWORD, CONF_PORT, CONF_USERNAME
+from homeassistant.const import (CONF_HOST, CONF_PASSWORD, CONF_PORT,
+                                 CONF_USERNAME)
 from homeassistant.core import callback
 from homeassistant.helpers import device_registry as dr
 
 from .api import LoxApp, LoxWs
-from .const import (
-    ATTR_CODE,
-    ATTR_UUID,
-    ATTR_VALUE,
-    DEFAULT,
-    DOMAIN,
-    EVENT,
-    SECUREDSENDDOMAIN,
-    SENDDOMAIN,
-)
+from .const import (ATTR_CODE, ATTR_UUID, ATTR_VALUE, DEFAULT, DOMAIN, EVENT,
+                    SECUREDSENDDOMAIN, SENDDOMAIN)
 from .helpers import get_miniserver_type
 
 _LOGGER = logging.getLogger(__name__)
@@ -225,12 +218,11 @@ class MiniServer:
             connections={
                 (CONNECTION_NETWORK_MAC, self.config_entry.options[CONF_HOST])
             },
-            identifiers={(DOMAIN, self.serial)},
             name=self.name,
-            manufacturer="Loxone",
-            default_manufacturer="Loxone",
-            sw_version=self.software_version,
             model=get_miniserver_type(self.miniserver_type),
+            identifiers={(DOMAIN, self.serial)},
+            manufacturer="Loxone",
+            sw_version=self.software_version,
             configuration_url="http://{host}:{port}".format(
                 host=self.lox_config.host, port=self.lox_config.port
             ),

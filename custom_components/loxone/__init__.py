@@ -13,16 +13,11 @@ import traceback
 import homeassistant.components.group as group
 import voluptuous as vol
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import (
-    CONF_HOST,
-    CONF_PASSWORD,
-    CONF_PORT,
-    CONF_USERNAME,
-    EVENT_COMPONENT_LOADED,
-    EVENT_HOMEASSISTANT_START,
-    EVENT_HOMEASSISTANT_STOP,
-)
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.const import (CONF_HOST, CONF_PASSWORD, CONF_PORT,
+                                 CONF_USERNAME, EVENT_COMPONENT_LOADED,
+                                 EVENT_HOMEASSISTANT_START,
+                                 EVENT_HOMEASSISTANT_STOP)
+from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import area_registry as ar
 from homeassistant.helpers import config_validation as cv
@@ -32,54 +27,25 @@ from homeassistant.helpers.discovery import async_load_platform
 from homeassistant.helpers.entity import Entity
 
 from .api import LoxApp, LoxWs
-from .const import (
-    AES_KEY_SIZE,
-    ATTR_AREA_CREATE,
-    ATTR_CODE,
-    ATTR_COMMAND,
-    ATTR_UUID,
-    ATTR_VALUE,
-    CMD_AUTH_WITH_TOKEN,
-    CMD_ENABLE_UPDATES,
-    CMD_ENCRYPT_CMD,
-    CMD_GET_KEY,
-    CMD_GET_KEY_AND_SALT,
-    CMD_GET_PUBLIC_KEY,
-    CMD_GET_VISUAL_PASSWD,
-    CMD_KEY_EXCHANGE,
-    CMD_REFRESH_TOKEN,
-    CMD_REFRESH_TOKEN_JSON_WEB,
-    CMD_REQUEST_TOKEN,
-    CMD_REQUEST_TOKEN_JSON_WEB,
-    CONF_LIGHTCONTROLLER_SUBCONTROLS_GEN,
-    CONF_SCENE_GEN,
-    CONF_SCENE_GEN_DELAY,
-    DEFAULT,
-    DEFAULT_DELAY_SCENE,
-    DEFAULT_PORT,
-    DEFAULT_TOKEN_PERSIST_NAME,
-    DOMAIN,
-    DOMAIN_DEVICES,
-    ERROR_VALUE,
-    EVENT,
-    IV_BYTES,
-    KEEP_ALIVE_PERIOD,
-    LOXAPPPATH,
-    LOXONE_PLATFORMS,
-    SALT_BYTES,
-    SALT_MAX_AGE_SECONDS,
-    SALT_MAX_USE_COUNT,
-    SECUREDSENDDOMAIN,
-    SENDDOMAIN,
-    TIMEOUT,
-    TOKEN_PERMISSION,
-    TOKEN_REFRESH_DEFAULT_SECONDS,
-    TOKEN_REFRESH_RETRY_COUNT,
-    TOKEN_REFRESH_SECONDS_BEFORE_EXPIRY,
-    cfmt,
-)
+from .const import (AES_KEY_SIZE, ATTR_AREA_CREATE, ATTR_CODE, ATTR_COMMAND,
+                    ATTR_DEVICE, ATTR_UUID, ATTR_VALUE, CMD_AUTH_WITH_TOKEN,
+                    CMD_ENABLE_UPDATES, CMD_ENCRYPT_CMD, CMD_GET_KEY,
+                    CMD_GET_KEY_AND_SALT, CMD_GET_PUBLIC_KEY,
+                    CMD_GET_VISUAL_PASSWD, CMD_KEY_EXCHANGE, CMD_REFRESH_TOKEN,
+                    CMD_REFRESH_TOKEN_JSON_WEB, CMD_REQUEST_TOKEN,
+                    CMD_REQUEST_TOKEN_JSON_WEB,
+                    CONF_LIGHTCONTROLLER_SUBCONTROLS_GEN, CONF_SCENE_GEN,
+                    CONF_SCENE_GEN_DELAY, DEFAULT, DEFAULT_DELAY_SCENE,
+                    DEFAULT_PORT, DEFAULT_TOKEN_PERSIST_NAME, DOMAIN,
+                    DOMAIN_DEVICES, ERROR_VALUE, EVENT, IV_BYTES,
+                    KEEP_ALIVE_PERIOD, LOXAPPPATH, LOXONE_PLATFORMS,
+                    SALT_BYTES, SALT_MAX_AGE_SECONDS, SALT_MAX_USE_COUNT,
+                    SECUREDSENDDOMAIN, SENDDOMAIN, TIMEOUT, TOKEN_PERMISSION,
+                    TOKEN_REFRESH_DEFAULT_SECONDS, TOKEN_REFRESH_RETRY_COUNT,
+                    TOKEN_REFRESH_SECONDS_BEFORE_EXPIRY, cfmt)
 from .helpers import get_miniserver_type
-from .miniserver import MiniServer, get_miniserver_from_config, get_miniserver_from_hass
+from .miniserver import (MiniServer, get_miniserver_from_config,
+                         get_miniserver_from_hass)
 
 REQUIREMENTS = ["websockets", "pycryptodome", "numpy"]
 
@@ -174,13 +140,30 @@ async def create_group_for_loxone_enties(hass, entites, name, object_id):
         await group.Group.async_create_group(
             hass,
             name,
-            object_id=object_id,
+            created_by_service=False,
             entity_ids=entites,
+            icon=None,
+            mode=None,
+            object_id=object_id,
+            order=None,
         )
+
     except HomeAssistantError as err:
+        await group.Group.async_create_group(
+            hass,
+            name,
+            entity_ids=entites,
+            icon=None,
+            mode=None,
+            object_id=object_id,
+            order=None,
+        )
         _LOGGER.error("Can't create group '%s' with error: %s", name, err)
     except Exception as err:
-        _LOGGER.error("Can't create group '%s' with error: %s", name, err)
+        _LOGGER.info(
+            "Can't create group '%s'. Try to make at least one group manually. (https://www.home-assistant.io/integrations/group/)",
+            name,
+        )
 
 
 async def async_setup_entry(hass, config_entry):
@@ -234,8 +217,14 @@ async def async_setup_entry(hass, config_entry):
     async def handle_websocket_command(call):
         """Handle websocket command services."""
         value = call.data.get(ATTR_VALUE, DEFAULT)
-        device_uuid = call.data.get(ATTR_UUID, DEFAULT)
-        await miniserver.api.send_websocket_command(device_uuid, value)
+        if call.data.get(ATTR_DEVICE) is None:
+            entity_uuid = call.data.get(ATTR_UUID, DEFAULT)
+        else:
+            entity_registry = er.async_get(hass)
+            entity_id = call.data.get(ATTR_DEVICE)
+            entity = entity_registry.async_get(entity_id)
+            entity_uuid = entity.unique_id
+        await miniserver.api.send_websocket_command(entity_uuid, value)
 
     async def sync_areas_with_loxone(data={}):
         create_areas = data.get(ATTR_AREA_CREATE, DEFAULT)
@@ -277,6 +266,8 @@ async def async_setup_entry(hass, config_entry):
                     dimmers = []
                     climates = []
                     fans = []
+                    accontrols = []
+                    numbers = []
 
                     for s in entity_ids:
                         s_dict = s.as_dict()
@@ -299,6 +290,10 @@ async def async_setup_entry(hass, config_entry):
                                 climates.append(s_dict["entity_id"])
                             elif device_typ == "Ventilation":
                                 fans.append(s_dict["entity_id"])
+                            elif device_typ == "AcControl":
+                                accontrols.append(s_dict["entity_id"])
+                            elif device_typ == "Slider":
+                                numbers.append(s_dict["entity_id"])
 
                     sensors_analog.sort()
                     sensors_digital.sort()
@@ -308,6 +303,8 @@ async def async_setup_entry(hass, config_entry):
                     climates.sort()
                     dimmers.sort()
                     fans.sort()
+                    accontrols.sort()
+                    numbers.sort()
 
                     await create_group_for_loxone_enties(
                         hass, sensors_analog, "Loxone Analog Sensors", "loxone_analog"
@@ -339,6 +336,15 @@ async def async_setup_entry(hass, config_entry):
                         "Loxone Ventilation Controllers",
                         "loxone_ventilations",
                     )
+                    await create_group_for_loxone_enties(
+                        hass,
+                        accontrols,
+                        "Loxone AC Controllers",
+                        "loxone_accontrollers",
+                    )
+                    await create_group_for_loxone_enties(
+                        hass, numbers, "Loxone Numbers", "loxone_numbers"
+                    )
                     await hass.async_block_till_done()
                     await create_group_for_loxone_enties(
                         hass,
@@ -349,6 +355,7 @@ async def async_setup_entry(hass, config_entry):
                             "group.loxone_covers",
                             "group.loxone_lights",
                             "group.loxone_ventilations",
+                            "group.loxone_numbers",
                         ],
                         "Loxone Group",
                         "loxone_group",
@@ -405,7 +412,7 @@ class LoxoneEntity(Entity):
                 try:
                     setattr(self, key, kwargs[key])
                 except AttributeError:
-                    _LOGGER.error(f"Could set {key} for {self._name}" )
+                    _LOGGER.error(f"Could set {key} for {self._name}")
                 except (Exception,):
                     traceback.print_exc()
                     sys.exit(-1)

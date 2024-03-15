@@ -2,17 +2,18 @@
 from __future__ import annotations
 
 import logging
-from voluptuous import Optional, Any
+
 from homeassistant.components.fan import (
-    SUPPORT_PRESET_MODE,
-    SUPPORT_SET_SPEED,
     FanEntity,
+    FanEntityFeature,
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import STATE_UNKNOWN
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.typing import ConfigType, DiscoveryInfoType
+from voluptuous import Any, Optional
 
 from . import LoxoneEntity
 from .binary_sensor import LoxoneDigitalSensor
@@ -63,6 +64,7 @@ async def async_setup_entry(
                 "room": get_room_name_from_room_uuid(loxconfig, fan.get("room", "")),
                 "cat": get_cat_name_from_cat_uuid(loxconfig, fan.get("cat", "")),
                 "async_add_devices": async_add_entities,
+                "config_entry": config_entry,
             }
         )
 
@@ -76,6 +78,7 @@ async def async_setup_entry(
                 "name": fan["name"] + " - Presence",
                 "device_class": "motion-sensor",
                 "async_add_devices": async_add_entities,
+                "config_entry": config_entry,
             }
             entites.append(LoxoneDigitalSensor(**presence))
         if fan["details"]["hasIndoorHumidity"] and "humidityIndoor" in fan["states"]:
@@ -89,6 +92,7 @@ async def async_setup_entry(
                 "details": {"format": "%.1f%"},
                 "device_class": "humidity",
                 "async_add_devices": async_add_entities,
+                "config_entry": config_entry,
             }
             entites.append(Loxonesensor(**humidity))
         if fan["details"]["hasAirQuality"] and "airQualityIndoor" in fan["states"]:
@@ -102,6 +106,7 @@ async def async_setup_entry(
                 "details": {"format": "%.1fppm"},
                 "device_class": "carbon_dioxide",
                 "async_add_devices": async_add_entities,
+                "config_entry": config_entry,
             }
             entites.append(Loxonesensor(**air_quality))
         # if "temperatureIndoor" in fan["states"]:
@@ -113,7 +118,7 @@ async def async_setup_entry(
         #         "cat": fan.get("cat", ""),
         #         "name": fan["name"] + " - Temperature",
         #         "details": {
-        #             "format": "%.1f°"
+        #             "format": "%.1f°C"
         #         },
         #         "async_add_devices": async_add_entities
         #     }
@@ -126,9 +131,10 @@ async def async_setup_entry(
                 "room": fan.get("room", ""),
                 "cat": fan.get("cat", ""),
                 "name": fan["name"] + " - Temperature",
-                "details": {"format": "%.1f°"},
+                "details": {"format": "%.1f°C"},
                 "device_class": "temperature",
                 "async_add_devices": async_add_entities,
+                "config_entry": config_entry,
             }
             entites.append(Loxonesensor(**temperature))
 
@@ -144,6 +150,7 @@ class LoxoneVentilation(LoxoneEntity, FanEntity):
         """Initialize the fan."""
         LoxoneEntity.__init__(self, **kwargs)
 
+        self._device_class = None
         self._state = STATE_UNKNOWN
         self._format = self._get_format(kwargs.get("details", {}).get("format", ""))
         self._attr_available = True
@@ -151,6 +158,14 @@ class LoxoneVentilation(LoxoneEntity, FanEntity):
         self._stateAttribUuids = kwargs["states"]
         self._stateAttribValues = {}
         self._details = kwargs["details"]
+
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, self.unique_id)},
+            name=f"{DOMAIN} {self.name}",
+            manufacturer="Loxone",
+            suggested_area=self.room,
+            model="Fan",
+        )
 
     @property
     def extra_state_attributes(self):
@@ -167,19 +182,9 @@ class LoxoneVentilation(LoxoneEntity, FanEntity):
         }
 
     @property
-    def device_info(self):
-        return {
-            "identifiers": {(DOMAIN, self.unique_id)},
-            "name": self.name,
-            "manufacturer": "Loxone",
-            "model": self.type,
-            "suggested_area": self.room,
-        }
-
-    @property
     def supported_features(self):
         """Flag supported features."""
-        return SUPPORT_PRESET_MODE | SUPPORT_SET_SPEED
+        return FanEntityFeature.PRESET_MODE | FanEntityFeature.SET_SPEED
 
     async def event_handler(self, event):
         # _LOGGER.debug(f"Fan Event data: {event.data}")
@@ -244,7 +249,6 @@ class LoxoneVentilation(LoxoneEntity, FanEntity):
     def preset_mode(self) -> str | None:
         """Return a list of available preset modes."""
         return VENTELATION_INT_TO_STR.get(self.get_state_value("mode"))
-
 
     @property
     def percentage(self) -> Optional[int]:
