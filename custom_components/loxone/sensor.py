@@ -22,7 +22,10 @@ from homeassistant.const import (CONF_DEVICE_CLASS, CONF_NAME,
                                  SPEED_KILOMETERS_PER_HOUR, STATE_UNKNOWN,
                                  TEMP_CELSIUS, TEMP_FAHRENHEIT, UnitOfEnergy,
                                  UnitOfPower, UnitOfPrecipitationDepth,
-                                 UnitOfSpeed, UnitOfTemperature)
+                                 UnitOfSpeed, UnitOfTemperature,
+                                 CONCENTRATION_PARTS_PER_MILLION,
+                                 PERCENTAGE
+                                 )
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -125,6 +128,22 @@ SENSOR_TYPES: tuple[LoxoneEntityDescription, ...] = (
         state_class=SensorStateClass.MEASUREMENT,
         device_class=SensorDeviceClass.ILLUMINANCE,
     ),
+    LoxoneEntityDescription(
+        key="co2",
+        name="CO2",
+        loxone_format_string=CONCENTRATION_PARTS_PER_MILLION,
+        native_unit_of_measurement=CONCENTRATION_PARTS_PER_MILLION,
+        state_class=SensorStateClass.MEASUREMENT,
+        device_class=SensorDeviceClass.CO2,
+    ),
+    LoxoneEntityDescription(
+        key="humidity",
+        name="Humidity",
+        loxone_format_string=PERCENTAGE,
+        native_unit_of_measurement=PERCENTAGE,
+        state_class=SensorStateClass.MEASUREMENT,
+        device_class=SensorDeviceClass.HUMIDITY,
+    )
 )
 
 
@@ -359,6 +378,11 @@ class Loxonesensor(LoxoneEntity, SensorEntity):
         self._attr_native_unit_of_measurement = self._clean_unit(self.details["format"])
         self._parent_id = kwargs.get("parent_id", None)
 
+        if "device_class" in kwargs:
+            self._device_class = kwargs["device_class"]
+        else:
+            self._device_class = None
+
         if entity_description := self._get_entity_description():
             self.entity_description = entity_description
 
@@ -374,6 +398,43 @@ class Loxonesensor(LoxoneEntity, SensorEntity):
     def available(self) -> bool:
         """Return entity availability."""
         return self.state is not None
+
+    @property
+    def icon(self):
+        type_sensor = "unknown"
+
+        if self._from_loxone_config:
+            type_sensor = self.typ
+        else:
+            type_sensor = self.device_class
+
+        if type_sensor == "presence":
+            """Return the sensor icon."""
+            return "mdi:motion-sensor"
+        elif type_sensor == "temperature":
+            """Return the temperature icon."""
+            return "mdi:temperature-celsius"
+        elif type_sensor == "carbon_dioxide":
+            """Return the carbon_dioxide icon."""
+            return "mdi:molecule-co2"
+        elif type_sensor == "humidity":
+            """Return the humidity icon."""
+            return "mdi:water-percent"
+
+    @property
+    def device_class(self):
+        """Return the class of this device, from component DEVICE_CLASSES."""
+        if not hasattr(self, "_device_class"):
+            return None
+        else:
+            return self._device_class
+
+    @device_class.setter
+    def device_class(self, device_class):
+        if not hasattr(self, "_device_class"):
+            setattr(self, "_device_class", device_class)
+        else:
+            self._device_class = device_class
 
     def _get_lox_rounded_value(self, value):
         try:
@@ -392,12 +453,21 @@ class Loxonesensor(LoxoneEntity, SensorEntity):
 
         Implemented by platform classes.
         """
-        return {
-            "uuid": self.uuidAction,
-            "device_typ": self.typ + "_sensor",
-            "platform": "loxone",
-            "category": self.cat,
-        }
+        if self._from_loxone_config:
+            return {
+                "uuid": self.uuidAction,
+                "room": self.room,
+                "category": self.cat,
+                "device_typ": self.type,
+                "platform": "loxone",
+            }
+        else:
+            return {
+                "uuid": self.uuidAction,
+                "device_typ": self.typ + "_sensor",
+                "platform": "loxone",
+                "category": self.cat,
+            }
 
     @property
     def device_info(self):

@@ -74,7 +74,7 @@ async def async_setup_entry(
                 "room": fan.get("room", ""),
                 "cat": fan.get("cat", ""),
                 "name": fan["name"] + " - Presence",
-                "device_class": "presence",
+                "device_class": "motion-sensor",
                 "async_add_devices": async_add_entities,
             }
             entites.append(LoxoneDigitalSensor(**presence))
@@ -196,8 +196,28 @@ class LoxoneVentilation(LoxoneEntity, FanEntity):
 
     @property
     def icon(self):
-        """Return the fan icon."""
-        return "mdi:fan"
+        type_sensor = "unknown"
+
+        if self._from_loxone_config:
+            type_sensor = self.typ
+        else:
+            type_sensor = self.device_class
+
+        if type_sensor == "presence":
+            """Return the sensor icon."""
+            return "mdi:motion-sensor"
+        elif type_sensor == "temperature":
+            """Return the temperature icon."""
+            return "mdi:temperature-celsius"
+        elif type_sensor == "carbon_dioxide":
+            """Return the carbon_dioxide icon."""
+            return "mdi:molecule-co2"
+        elif type_sensor == "humidity":
+            """Return the humidity icon."""
+            return "mdi:water-percent"
+        else:
+            """Return the default fan icon."""
+            return "mdi:fan"
 
     @property
     def device_class(self):
