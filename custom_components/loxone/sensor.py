@@ -430,9 +430,9 @@ class Loxonesensor(LoxoneEntity, SensorEntity):
     def icon(self):
         type_sensor = "unknown"
 
-        if self._from_loxone_config:
-            type_sensor = self.typ
-        else:
+        if hasattr(self, "_device_class"):
+            type_sensor = self._device_class
+        elif hasattr(self, "device_class"):
             type_sensor = self.device_class
 
         if type_sensor == "presence":
