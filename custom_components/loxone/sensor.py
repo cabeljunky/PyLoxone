@@ -10,6 +10,7 @@ from dataclasses import dataclass
 import homeassistant.helpers.config_validation as cv
 import voluptuous as vol
 from homeassistant.components.sensor import (PLATFORM_SCHEMA,
+                                             CONF_STATE_CLASS,
                                              SensorDeviceClass, SensorEntity,
                                              SensorEntityDescription,
                                              SensorStateClass)
@@ -44,7 +45,6 @@ NEW_SENSOR = "sensors"
 _LOGGER = logging.getLogger(__name__)
 
 DEFAULT_NAME = "Loxone Sensor"
-
 
 PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
     {
