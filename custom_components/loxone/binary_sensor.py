@@ -1,4 +1,5 @@
 """Support for Fritzbox binary sensors."""
+
 from __future__ import annotations
 
 import logging
@@ -6,20 +7,14 @@ from typing import Literal, final
 
 import homeassistant.helpers.config_validation as cv
 import voluptuous as vol
-from homeassistant.components.binary_sensor import (
-    PLATFORM_SCHEMA,
-    BinarySensorDeviceClass,
-    BinarySensorEntity,
-)
+from homeassistant.components.binary_sensor import (PLATFORM_SCHEMA,
+                                                    BinarySensorDeviceClass,
+                                                    BinarySensorEntity)
+from homeassistant.components.sensor import CONF_STATE_CLASS
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import (
-    CONF_DEVICE_CLASS,
-    CONF_NAME,
-    CONF_VALUE_TEMPLATE,
-    STATE_OFF,
-    STATE_ON,
-    STATE_UNKNOWN,
-)
+from homeassistant.const import (CONF_DEVICE_CLASS, CONF_NAME,
+                                 CONF_UNIT_OF_MEASUREMENT, CONF_VALUE_TEMPLATE,
+                                 STATE_OFF, STATE_ON, STATE_UNKNOWN)
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -27,7 +22,8 @@ from homeassistant.helpers.typing import ConfigType, DiscoveryInfoType
 
 from . import LoxoneEntity
 from .const import CONF_ACTIONID, DOMAIN, SENDDOMAIN
-from .helpers import get_all, get_cat_name_from_cat_uuid, get_room_name_from_room_uuid
+from .helpers import (add_room_and_cat_to_value_values, get_all,
+                      get_or_create_device)
 from .miniserver import get_miniserver_from_hass
 
 _LOGGER = logging.getLogger(__name__)
@@ -37,7 +33,7 @@ DEFAULT_NAME = "Loxone Binary Sensor"
 PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
     {
         vol.Required(CONF_ACTIONID): cv.string,
-        vol.Optional(CONF_NAME): cv.string,
+        vol.Required(CONF_NAME): cv.string,
         vol.Optional(CONF_DEVICE_CLASS): cv.string,
     }
 )
@@ -71,37 +67,22 @@ async def async_setup_entry(
     """Set up entry."""
     miniserver = get_miniserver_from_hass(hass)
     loxconfig = miniserver.lox_config.json
-    digital_sensors = []
+    entities = []
 
     for sensor in get_all(loxconfig, "InfoOnlyDigital"):
-        sensor.update(
-            {
-                "typ": "digital",
-                "room": get_room_name_from_room_uuid(loxconfig, sensor.get("room", "")),
-                "cat": get_cat_name_from_cat_uuid(loxconfig, sensor.get("cat", "")),
-            }
-        )
-        digital_sensors.append(LoxoneDigitalSensor(**sensor))
+        sensor = add_room_and_cat_to_value_values(loxconfig, sensor)
+        sensor.update({"type": "digital"})
+        entities.append(LoxoneDigitalSensor(**sensor))
 
     for sensor in get_all(loxconfig, "PresenceDetector"):
-        sensor.update(
-            {
-                "typ": "presence",
-                "room": get_room_name_from_room_uuid(loxconfig, sensor.get("room", "")),
-                "cat": get_cat_name_from_cat_uuid(loxconfig, sensor.get("cat", "")),
-            }
-        )
-        digital_sensors.append(LoxoneDigitalSensor(**sensor))
+        sensor = add_room_and_cat_to_value_values(loxconfig, sensor)
+        sensor.update({"type": "presence"})
+        entities.append(LoxoneDigitalSensor(**sensor))
 
     for sensor in get_all(loxconfig, "SmokeAlarm"):
-        sensor.update(
-            {
-                "typ": "smoke",
-                "room": get_room_name_from_room_uuid(loxconfig, sensor.get("room", "")),
-                "cat": get_cat_name_from_cat_uuid(loxconfig, sensor.get("cat", "")),
-            }
-        )
-        digital_sensors.append(LoxoneDigitalSensor(**sensor))
+        sensor = add_room_and_cat_to_value_values(loxconfig, sensor)
+        sensor.update({"type": "smoke"})
+        entities.append(LoxoneDigitalSensor(**sensor))
 
     @callback
     def async_add_binary_sensors(_):
@@ -114,27 +95,26 @@ async def async_setup_entry(
             async_add_binary_sensors,
         )
     )
-    async_add_entities(digital_sensors)
+    async_add_entities(entities)
 
 
 class LoxoneDigitalSensor(LoxoneEntity, BinarySensorEntity):
     """Representation of a binary Loxone device."""
 
     def __init__(self, **kwargs):
+        super().__init__(**kwargs)
         self._from_loxone_config = False
 
-        LoxoneEntity.__init__(self, **kwargs)
-
         if (
-            "typ" in kwargs
+            "type" in kwargs
             and "room" in kwargs
             and "cat" in kwargs
             and hasattr(self, "states")
         ):
             self._from_loxone_config = True
-            if self.typ == "smoke":
+            if self.type == "smoke":
                 self._state_uuid = self.states["areAlarmSignalsOff"]
-            if self.typ == "presence":
+            if self.type == "presence":
                 self._state_uuid = self.states["active"]
             elif "active" in self.states:
                 self._state_uuid = self.uuidAction
@@ -148,14 +128,20 @@ class LoxoneDigitalSensor(LoxoneEntity, BinarySensorEntity):
         self._off_state = STATE_OFF
         self._attr_available = True
 
-    @property
-    def extra_state_attributes(self):
-        """Return device specific state attributes.
+        if self._parent_id:
+            self.uuidAction = self._parent_id
 
-        Implemented by platform classes.
-        """
         if self._from_loxone_config:
-            return {
+            self._attr_device_info = get_or_create_device(
+                self.unique_id, self.name, self.type, self.room
+            )
+        else:
+            self._attr_device_info = get_or_create_device(
+                self.unique_id, self.name, self.type, ""
+            )
+
+        if self._from_loxone_config:
+            self._attr_extra_state_attributes = {
                 "uuid": self.uuidAction,
                 "state_uuid": self._state_uuid,
                 "room": self.room,
@@ -164,27 +150,22 @@ class LoxoneDigitalSensor(LoxoneEntity, BinarySensorEntity):
                 "platform": "loxone",
             }
         else:
-            return {
+            self._attr_extra_state_attributes = {
                 "uuid": self.uuidAction,
                 "platform": "loxone",
                 "device_typ": self.device_class,
             }
 
-    # @property
-    # def name(self):
-    #    """Return the name of the sensor."""
-    #    return self._name
-
     @property
     def icon(self):
         if self._from_loxone_config:
-            if self.typ == "presence":
+            if self.type == "presence":
                 """Return the sensor icon."""
                 return "mdi:motion-sensor"
-            elif self.typ == "smoke":
+            elif self.type == "smoke":
                 """Return the sensor icon."""
                 return "mdi:smoke-detector"
-            elif self.typ == "digital":
+            elif self.type == "digital":
                 """Return the sensor icon."""
                 return "mdi:checkbox-blank-circle-outline"
         else:
@@ -201,43 +182,6 @@ class LoxoneDigitalSensor(LoxoneEntity, BinarySensorEntity):
                 """Return the sensor icon."""
             else:
                 return "mdi:checkbox-blank-circle-outline"
-
-    @property
-    def device_class(self):
-        """Return the class of this device, from component DEVICE_CLASSES."""
-        if not hasattr(self, "_device_class"):
-            return None
-        else:
-            return self._device_class
-
-    @device_class.setter
-    def device_class(self, device_class):
-        if not hasattr(self, "_device_class"):
-            setattr(self, "_device_class", device_class)
-        else:
-            self._device_class = device_class
-
-    @property
-    def device_info(self):
-        _uuid = self.unique_id
-
-        if self._parent_id:
-            _uuid = self._parent_id
-
-        if self._from_loxone_config:
-            return {
-                "identifiers": {(DOMAIN, _uuid)},
-                "name": self.name,
-                "manufacturer": "Loxone",
-                "model": self.type,
-                "suggested_area": self.room,
-            }
-        else:
-            return {
-                "identifiers": {(DOMAIN, _uuid)},
-                "name": self.name,
-                "manufacturer": "Loxone",
-            }
 
     async def event_handler(self, e):
         if self._state_uuid in e.data:
@@ -264,6 +208,7 @@ class LoxoneDigitalSensor(LoxoneEntity, BinarySensorEntity):
 
 class LoxoneCustomBinarySensor(LoxoneEntity, BinarySensorEntity):
     def __init__(self, **kwargs):
+        super().__init__(**kwargs)
         self._name = kwargs["name"]
         self._state = STATE_UNKNOWN
         self._on_state = STATE_ON
@@ -275,21 +220,13 @@ class LoxoneCustomBinarySensor(LoxoneEntity, BinarySensorEntity):
             self.uuidAction = ""
 
         if "device_class" in kwargs:
-            self._device_class = kwargs["device_class"]
-        else:
-            self._device_class = None
-
-    @property
-    def device_class(self):
-        """Return the class of this device, from component DEVICE_CLASSES."""
-        return self._device_class
+            self._attr_device_class = kwargs["device_class"]
 
     @property
     def is_on(self) -> bool | None:
         """Return true if sensor is on."""
         return self._state == self._on_state
 
-    @final
     @property
     def state(self) -> Literal["on", "off"] | None:
         """Return the state of the binary sensor."""
@@ -310,32 +247,3 @@ class LoxoneCustomBinarySensor(LoxoneEntity, BinarySensorEntity):
     def name(self):
         """Return the name of the sensor."""
         return self._name
-
-    #
-    # @property
-    # def native_value(self):
-    #     return self._state
-    #
-    # @property
-    # def native_unit_of_measurement(self):
-    #     """Return the unit of measurement of this entity, if any."""
-    #     if self._unit_of_measurement in ["None", "none", "-"]:
-    #         return None
-    #     return self._unit_of_measurement
-    #
-    # @property
-    # def extra_state_attributes(self):
-    #     """Return device specific state attributes.
-    #
-    #     Implemented by platform classes.
-    #     """
-    #     return {
-    #         "uuid": self.uuidAction,
-    #         "platform": "loxone",
-    #     }
-    #
-
-    #
-    # @property
-    # def state_class(self):
-    #     return self._state_class

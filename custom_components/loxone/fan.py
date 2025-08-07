@@ -1,25 +1,24 @@
 """Interfaces with Alarm.com alarm control panels."""
+
 from __future__ import annotations
 
 import logging
-from voluptuous import Optional, Any
-from homeassistant.components.fan import (
-    SUPPORT_PRESET_MODE,
-    SUPPORT_SET_SPEED,
-    FanEntity,
-)
+
+from homeassistant.components.fan import FanEntity, FanEntityFeature
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import STATE_UNKNOWN
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.typing import ConfigType, DiscoveryInfoType
+from voluptuous import Any, Optional
 
 from . import LoxoneEntity
 from .binary_sensor import LoxoneDigitalSensor
-from .const import DOMAIN, SENDDOMAIN
-from .helpers import get_all, get_cat_name_from_cat_uuid, get_room_name_from_room_uuid
+from .const import SENDDOMAIN
+from .helpers import (add_room_and_cat_to_value_values, get_all,
+                      get_or_create_device)
 from .miniserver import get_miniserver_from_hass
-from .sensor import Loxonesensor
+from .sensor import LoxoneSensor
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -54,15 +53,15 @@ async def async_setup_entry(
     """Set up entry."""
     miniserver = get_miniserver_from_hass(hass)
     loxconfig = miniserver.lox_config.json
-    entites = []
+    entities = []
 
     for fan in get_all(loxconfig, "Ventilation"):
+        fan = add_room_and_cat_to_value_values(loxconfig, fan)
         fan.update(
             {
-                "typ": "ventilation",
-                "room": get_room_name_from_room_uuid(loxconfig, fan.get("room", "")),
-                "cat": get_cat_name_from_cat_uuid(loxconfig, fan.get("cat", "")),
+                "type": "ventilation",
                 "async_add_devices": async_add_entities,
+                "config_entry": config_entry,
             }
         )
 
@@ -70,71 +69,75 @@ async def async_setup_entry(
             presence = {
                 "parent_id": fan["uuidAction"],
                 "uuidAction": fan["states"]["presence"],
-                "typ": "presence",
+                "type": "presence",
                 "room": fan.get("room", ""),
                 "cat": fan.get("cat", ""),
                 "name": fan["name"] + " - Presence",
                 "device_class": "presence",
                 "async_add_devices": async_add_entities,
+                "config_entry": config_entry,
             }
-            entites.append(LoxoneDigitalSensor(**presence))
+            entities.append(LoxoneDigitalSensor(**presence))
         if fan["details"]["hasIndoorHumidity"] and "humidityIndoor" in fan["states"]:
             humidity = {
                 "parent_id": fan["uuidAction"],
                 "uuidAction": fan["states"]["humidityIndoor"],
-                "typ": "analog",
+                "type": "analog",
                 "room": fan.get("room", ""),
                 "cat": fan.get("cat", ""),
                 "name": fan["name"] + " - Humidity",
                 "details": {"format": "%.1f%"},
                 "device_class": "humidity",
                 "async_add_devices": async_add_entities,
+                "config_entry": config_entry,
             }
-            entites.append(Loxonesensor(**humidity))
+            entities.append(LoxoneSensor(**humidity))
         if fan["details"]["hasAirQuality"] and "airQualityIndoor" in fan["states"]:
             air_quality = {
                 "parent_id": fan["uuidAction"],
                 "uuidAction": fan["states"]["airQualityIndoor"],
-                "typ": "analog",
+                "type": "analog",
                 "room": fan.get("room", ""),
                 "cat": fan.get("cat", ""),
                 "name": fan["name"] + " - Air Quality",
                 "details": {"format": "%.1fppm"},
                 "device_class": "carbon_dioxide",
                 "async_add_devices": async_add_entities,
+                "config_entry": config_entry,
             }
-            entites.append(Loxonesensor(**air_quality))
+            entities.append(LoxoneSensor(**air_quality))
         # if "temperatureIndoor" in fan["states"]:
         #     temperature = {
         #         "parent_id": fan["uuidAction"],
         #         "uuidAction": fan["states"]["temperatureIndoor"],
-        #         "typ": "analog",
+        #         "type": "analog",
         #         "room": fan.get("room", ""),
         #         "cat": fan.get("cat", ""),
         #         "name": fan["name"] + " - Temperature",
         #         "details": {
-        #             "format": "%.1f°"
+        #             "format": "%.1f°C"
         #         },
         #         "async_add_devices": async_add_entities
         #     }
-        #     entites.append(Loxonesensor(**temperature))
+        #     entities.append(LoxoneSensor(**temperature))
         if "temperatureOutdoor" in fan["states"]:
             temperature = {
                 "parent_id": fan["uuidAction"],
                 "uuidAction": fan["states"]["temperatureOutdoor"],
-                "typ": "analog",
+                "type": "analog",
                 "room": fan.get("room", ""),
                 "cat": fan.get("cat", ""),
                 "name": fan["name"] + " - Temperature",
-                "details": {"format": "%.1f°"},
+                "details": {"format": "%.1f°C"},
                 "device_class": "temperature",
                 "async_add_devices": async_add_entities,
+                "config_entry": config_entry,
             }
-            entites.append(Loxonesensor(**temperature))
+            entities.append(LoxoneSensor(**temperature))
 
-        entites.append(LoxoneVentilation(**fan))
+        entities.append(LoxoneVentilation(**fan))
 
-    async_add_entities(entites)
+    async_add_entities(entities)
 
 
 class LoxoneVentilation(LoxoneEntity, FanEntity):
@@ -142,8 +145,9 @@ class LoxoneVentilation(LoxoneEntity, FanEntity):
 
     def __init__(self, **kwargs) -> None:
         """Initialize the fan."""
-        LoxoneEntity.__init__(self, **kwargs)
+        super().__init__(**kwargs)
 
+        self._device_class = None
         self._state = STATE_UNKNOWN
         self._format = self._get_format(kwargs.get("details", {}).get("format", ""))
         self._attr_available = True
@@ -151,6 +155,11 @@ class LoxoneVentilation(LoxoneEntity, FanEntity):
         self._stateAttribUuids = kwargs["states"]
         self._stateAttribValues = {}
         self._details = kwargs["details"]
+
+        self.type = "Fan"
+        self._attr_device_info = get_or_create_device(
+            self.unique_id, self.name, self.type, self.room
+        )
 
     @property
     def extra_state_attributes(self):
@@ -162,24 +171,14 @@ class LoxoneVentilation(LoxoneEntity, FanEntity):
             "uuid": self.uuidAction,
             "room": self.room,
             "category": self.cat,
-            "device_typ": self.type,
+            "device_type": self.type,
             "platform": "loxone",
-        }
-
-    @property
-    def device_info(self):
-        return {
-            "identifiers": {(DOMAIN, self.unique_id)},
-            "name": self.name,
-            "manufacturer": "Loxone",
-            "model": self.type,
-            "suggested_area": self.room,
         }
 
     @property
     def supported_features(self):
         """Flag supported features."""
-        return SUPPORT_PRESET_MODE | SUPPORT_SET_SPEED
+        return FanEntityFeature.PRESET_MODE | FanEntityFeature.SET_SPEED
 
     async def event_handler(self, event):
         # _LOGGER.debug(f"Fan Event data: {event.data}")
@@ -225,7 +224,6 @@ class LoxoneVentilation(LoxoneEntity, FanEntity):
         """Return a list of available preset modes."""
         return VENTELATION_INT_TO_STR.get(self.get_state_value("mode"))
 
-
     @property
     def percentage(self) -> Optional[int]:
         """Return the current speed percentage."""
@@ -250,7 +248,7 @@ class LoxoneVentilation(LoxoneEntity, FanEntity):
     def set_percentage(self, percentage: int) -> None:
         """Set the speed percentage of the fan."""
         interval = 3600
-        self.hass.bus.async_fire(
+        self.hass.bus.fire(
             SENDDOMAIN,
             dict(
                 uuid=self.uuidAction,
