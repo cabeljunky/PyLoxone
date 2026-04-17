@@ -9,6 +9,7 @@ import logging
 import re
 from dataclasses import dataclass
 from functools import cached_property
+from typing import Any
 
 import homeassistant.helpers.config_validation as cv
 import voluptuous as vol
@@ -27,9 +28,10 @@ from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.typing import ConfigType, DiscoveryInfoType
+from homeassistant.util import dt as dt_util
 
 from . import LoxoneEntity
-from .const import CONF_ACTIONID, DOMAIN, SENDDOMAIN
+from .const import CONF_ACTIONID, DOMAIN, SENDDOMAIN, THROTTLE_KEEP_ALIVE_TIME
 from .helpers import (add_room_and_cat_to_value_values, get_all,
                       get_or_create_device)
 from .miniserver import get_miniserver_from_hass
@@ -51,14 +53,14 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
 )
 
 
-@dataclass
+@dataclass(frozen=True)
 class LoxoneRequiredKeysMixin:
     """Mixin for required keys."""
 
     loxone_format_string: str
 
 
-@dataclass
+@dataclass(frozen=True)
 class LoxoneEntityDescription(SensorEntityDescription, LoxoneRequiredKeysMixin):
     """Describes Loxone sensor entity."""
 
@@ -119,6 +121,15 @@ SENSOR_TYPES: tuple[LoxoneEntityDescription, ...] = (
         device_class=SensorDeviceClass.POWER,
     ),
     LoxoneEntityDescription(
+        key="power",
+        name="Kilowatt",
+        suggested_display_precision=3,
+        loxone_format_string=UnitOfPower.KILO_WATT,
+        native_unit_of_measurement=UnitOfPower.KILO_WATT,
+        state_class=SensorStateClass.MEASUREMENT,
+        device_class=SensorDeviceClass.POWER,
+    ),
+    LoxoneEntityDescription(
         key="light_level",
         name="Light Level",
         loxone_format_string=LIGHT_LUX,
@@ -166,7 +177,8 @@ async def async_setup_entry(
     miniserver = get_miniserver_from_hass(hass)
 
     loxconfig = miniserver.lox_config.json
-    entities = []
+    entities: list[Any] = [LoxoneKeepAliveSensor()]
+
     if "softwareVersion" in loxconfig:
         entities.append(LoxoneVersionSensor(loxconfig["softwareVersion"]))
 
@@ -178,6 +190,32 @@ async def async_setup_entry(
     for sensor in get_all(loxconfig, "TextInput"):
         sensor = add_room_and_cat_to_value_values(loxconfig, sensor)
         entities.append(LoxoneTextSensor(**sensor))
+
+    for sensor in get_all(loxconfig, "Meter"):
+        _LOGGER.info("Found Meter: %s", sensor)
+        sensor = add_room_and_cat_to_value_values(loxconfig, sensor)
+        device_info = LoxoneMeterSensor.create_DeviceInfo_from_sensor(sensor)
+
+        for state_key, name_suffix, format_key in [
+            ("actual", "Actual", "actualFormat"),
+            ("total", "Total", "totalFormat"),
+            ("totalNeg", "Total Neg", "totalFormat"),
+            ("storage", "Level", "storageFormat"),
+        ]:
+            if state_key in sensor["states"]:
+                subsensor = {
+                    "device_info": device_info,
+                    "parent_id": sensor["uuidAction"],
+                    "uuidAction": sensor["states"][state_key],
+                    "type": "analog",
+                    "room": sensor.get("room", ""),
+                    "cat": sensor.get("cat", ""),
+                    "name": f"{sensor['name']} {name_suffix}",
+                    "details": {"format": sensor["details"][format_key]},
+                    "async_add_devices": async_add_entities,
+                    "config_entry": config_entry,
+                }
+                entities.append(LoxoneMeterSensor(**subsensor))
 
     @callback
     def async_add_sensors(_):
@@ -201,6 +239,11 @@ class LoxoneCustomSensor(LoxoneEntity, SensorEntity):
         self._attr_native_value = None  # Initialize state
         # Must be after the kwargs.pop functions!
         super().__init__(**kwargs)
+
+    @cached_property
+    def unique_id(self) -> str:
+        """Return a unique ID."""
+        return self.uuidAction + self._attr_name
 
     async def event_handler(self, e):
         if self.uuidAction in e.data:
@@ -226,10 +269,42 @@ class LoxoneCustomSensor(LoxoneEntity, SensorEntity):
     @property
     def extra_state_attributes(self):
         """Return device specific state attributes."""
-        return {
-            "uuid": self.uuidAction,
-            "platform": "loxone",
-        }
+        return {**self._attr_extra_state_attributes}
+
+
+class LoxoneKeepAliveSensor(LoxoneEntity, SensorEntity):
+    _attr_name = "Loxone Last Keep Alive Message"
+    _attr_icon = "mdi:information-outline"
+    _attr_unique_id = "loxone_keep_alive_sensor_uuid"
+    _attr_device_class = SensorDeviceClass.TIMESTAMP  # tell HA this is a timestamp
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self._attr_native_value = None
+
+    @cached_property
+    def unique_id(self) -> str:
+        """Return a unique ID."""
+        return self._attr_unique_id
+
+    async def event_handler(self, e):
+        if "keep_alive" in e.data and e.data["keep_alive"] == "received":
+            now = dt_util.utcnow()
+            # only update if at least 60 seconds passed since last update
+            if self._attr_native_value is not None:
+                time_since_last = (now - self._attr_native_value).total_seconds()
+                if time_since_last < THROTTLE_KEEP_ALIVE_TIME:
+                    # too soon, skip this update
+                    return
+
+            # update the timestamp
+            self._attr_native_value = now
+            self.async_schedule_update_ha_state()
+
+    @property
+    def extra_state_attributes(self):
+        """Return device specific state attributes."""
+        return {**self._attr_extra_state_attributes}
 
 
 class LoxoneVersionSensor(LoxoneEntity, SensorEntity):
@@ -284,10 +359,8 @@ class LoxoneTextSensor(LoxoneEntity, SensorEntity):
     def extra_state_attributes(self):
         """Return device specific state attributes."""
         return {
-            "uuid": self.uuidAction,
+            **self._attr_extra_state_attributes,
             "device_type": self.type,
-            "platform": "loxone",
-            "category": self.cat,
         }
 
 
@@ -355,8 +428,28 @@ class LoxoneSensor(LoxoneEntity, SensorEntity):
     def extra_state_attributes(self):
         """Return device specific state attributes."""
         return {
-            "uuid": self.uuidAction,
+            **self._attr_extra_state_attributes,
             "device_type": self.type + "_sensor",
-            "platform": "loxone",
-            "category": self.cat,
         }
+
+
+class LoxoneMeterSensor(LoxoneSensor, SensorEntity):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        device_info = kwargs.get("device_info", None)
+        if device_info:
+            self._attr_device_info = device_info
+
+    @staticmethod
+    def create_DeviceInfo_from_sensor(sensor) -> DeviceInfo:
+        try:
+            # For legacy Meter
+            model = sensor["details"]["type"].capitalize() + " Meter"
+        except (KeyError, TypeError):
+            model = "Meter"
+        return DeviceInfo(
+            identifiers={(DOMAIN, sensor["uuidAction"])},
+            name=sensor["name"],
+            manufacturer="Loxone",
+            model=model,
+        )

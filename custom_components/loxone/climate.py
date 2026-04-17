@@ -6,6 +6,7 @@ https://github.com/JoDehli/PyLoxone
 """
 
 import logging
+import json
 from abc import ABC
 
 from homeassistant.components.climate import PLATFORM_SCHEMA, ClimateEntity
@@ -29,6 +30,7 @@ _LOGGER = logging.getLogger(__name__)
 
 OPMODES = {
     None: HVACMode.OFF,
+    -1: HVACMode.OFF,
     0: HVACMode.AUTO,
     1: HVACMode.AUTO,
     2: HVACMode.AUTO,
@@ -37,7 +39,12 @@ OPMODES = {
     5: HVACMode.HEAT_COOL,
 }
 
-OPMODETOLOXONE = {HVACMode.HEAT_COOL: 3, HVACMode.HEAT: 4, HVACMode.COOL: 5}
+OPMODETOLOXONE = {
+    HVACMode.HEAT_COOL: 3,
+    HVACMode.HEAT: 4,
+    HVACMode.COOL: 5,
+    HVACMode.OFF: -1,
+}
 
 
 PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
@@ -83,6 +90,16 @@ async def async_setup_entry(
         )
         entities.append(LoxoneRoomControllerV2(**climate))
 
+    for climate in get_all(loxconfig, "IRoomController"):
+        climate = add_room_and_cat_to_value_values(loxconfig, climate)
+        climate.update(
+            {
+                "hass": hass,
+                CONF_HVAC_AUTO_MODE: 0,
+            }
+        )
+        entities.append(LoxoneRoomController(**climate))
+
     for accontrol in get_all(loxconfig, "AcControl"):
         accontrol = add_room_and_cat_to_value_values(loxconfig, accontrol)
         accontrol.update(
@@ -95,10 +112,215 @@ async def async_setup_entry(
     async_add_entities(entities)
 
 
+class LoxoneRoomController(LoxoneEntity, ClimateEntity, ABC):
+    """Loxone room controller (legacy, non-V2)"""
+
+    def __init__(self, **kwargs):
+        # Add room name to entity name for better identification in HomeKit
+        if "room" in kwargs and kwargs["room"]:
+            kwargs["name"] = f"{kwargs['room']} Climate"
+
+        super().__init__(**kwargs)
+        self.hass = kwargs["hass"]
+        self._autoMode = kwargs[CONF_HVAC_AUTO_MODE]
+        self._stateAttribUuids = kwargs["states"]
+        self._stateAttribValues = {}
+        self.type = "RoomController"
+
+        # Set supported features
+        self._attr_supported_features = (
+            ClimateEntityFeature.TARGET_TEMPERATURE
+            | ClimateEntityFeature.TURN_OFF
+            | ClimateEntityFeature.TURN_ON
+        )
+
+        # Flatten UUID values - some might be lists (e.g., "temperatures")
+        self._all_uuids = set()
+        for value in self._stateAttribUuids.values():
+            if isinstance(value, list):
+                self._all_uuids.update(value)
+            else:
+                self._all_uuids.add(value)
+
+        self._attr_device_info = get_or_create_device(
+            self.unique_id, self.name, self.type, self.room
+        )
+
+    async def event_handler(self, event):
+        update = False
+
+        for key in self._all_uuids & event.data.keys():
+            self._stateAttribValues[key] = event.data[key]
+            update = True
+
+        if update:
+            self.async_write_ha_state()
+
+    def get_state_value(self, name):
+        uuid = self._stateAttribUuids.get(name)
+        if isinstance(uuid, list):
+            # For "temperatures" which is a list of UUIDs
+            return [
+                self._stateAttribValues.get(u)
+                for u in uuid
+                if u in self._stateAttribValues
+            ]
+        return (
+            self._stateAttribValues[uuid]
+            if uuid and uuid in self._stateAttribValues
+            else None
+        )
+
+    @property
+    def extra_state_attributes(self):
+        """Return device specific state attributes."""
+        return {
+            **self._attr_extra_state_attributes,
+            "mode": self.get_state_value("mode"),
+            "override": self.get_state_value("override"),
+            "open_window": self.get_state_value("openWindow"),
+            "curr_heat_temp_ix": self.get_state_value("currHeatTempIx"),
+            "curr_cool_temp_ix": self.get_state_value("currCoolTempIx"),
+        }
+
+    @property
+    def current_temperature(self):
+        """Return the current temperature."""
+        return self.get_state_value("tempActual")
+
+    @property
+    def target_temperature(self) -> float | None:
+        """Return the temperature we try to reach."""
+        return self.get_state_value("tempTarget")
+
+    def set_temperature(self, **kwargs):
+        """Set new target temperature"""
+        temp = kwargs.get("temperature")
+        if temp is None:
+            return
+
+        # IRoomController uses setTemp with current temperature index
+        # Get the current active temperature index based on mode
+        mode = self.get_state_value("mode")
+
+        # Determine which temperature index to use
+        temp_idx = self.get_state_value("currHeatTempIx")
+        if mode == 2:  # Cooling mode
+            cool_idx = self.get_state_value("currCoolTempIx")
+            if cool_idx is not None:
+                temp_idx = cool_idx
+
+        if temp_idx is not None:
+            # Command format: setTemp/<index>/<value>
+            self.hass.bus.fire(
+                SENDDOMAIN,
+                dict(
+                    uuid=self.uuidAction,
+                    value=f"setTemp/{int(temp_idx)}/{temp}",
+                ),
+            )
+            self.schedule_update_ha_state()
+
+    @property
+    def hvac_action(self) -> HVACAction | None:
+        """Return the current HVAC action (heating, cooling)."""
+        valve_heat = self.get_state_value("valveHeat")
+        valve_cool = self.get_state_value("valveCool")
+
+        if valve_heat and valve_heat > 0:
+            return HVACAction.HEATING
+        elif valve_cool and valve_cool > 0:
+            return HVACAction.COOLING
+
+        if self.get_state_value("isPreparing") == 1:
+            return HVACAction.PREHEATING
+
+        return HVACAction.IDLE
+
+    @property
+    def hvac_mode(self) -> HVACMode | None:
+        """Return hvac operation mode."""
+        mode = self.get_state_value("mode")
+
+        # mode: 0=Auto, 1=Heat, 2=Cool, 3=Heat/Cool, 4=Off
+        if mode == 0:
+            return HVACMode.AUTO
+        elif mode == 1:
+            return HVACMode.HEAT
+        elif mode == 2:
+            return HVACMode.COOL
+        elif mode == 3:
+            return HVACMode.HEAT_COOL
+        else:
+            return HVACMode.OFF
+
+    @property
+    def hvac_modes(self) -> list[HVACMode]:
+        """Return the list of available hvac operation modes."""
+        return [
+            HVACMode.OFF,
+            HVACMode.AUTO,
+            HVACMode.HEAT,
+            HVACMode.COOL,
+            HVACMode.HEAT_COOL,
+        ]
+
+    @property
+    def temperature_unit(self) -> str:
+        """Return the unit of measurement used by the platform."""
+        format_str = self.details.get("format")
+
+        if format_str is None:
+            return UnitOfTemperature.CELSIUS
+
+        if "°F" in format_str or "F" in format_str:
+            return UnitOfTemperature.FAHRENHEIT
+
+        if "°C" in format_str or "C" in format_str:
+            return UnitOfTemperature.CELSIUS
+
+        return UnitOfTemperature.CELSIUS
+
+    @property
+    def target_temperature_step(self) -> float | None:
+        """Return the supported step of target temperature."""
+        return 0.5
+
+    @property
+    def min_temp(self) -> float:
+        """Return the minimum temperature."""
+        return 7.0
+
+    @property
+    def max_temp(self) -> float:
+        """Return the maximum temperature."""
+        return 35.0
+
+    def set_hvac_mode(self, hvac_mode: str):
+        """Set new target hvac mode."""
+        # Map HVAC mode to Loxone mode
+        mode_map = {
+            HVACMode.OFF: 4,
+            HVACMode.AUTO: 0,
+            HVACMode.HEAT: 1,
+            HVACMode.COOL: 2,
+            HVACMode.HEAT_COOL: 3,
+        }
+
+        target_mode = mode_map.get(hvac_mode, 0)
+
+        self.hass.bus.fire(
+            SENDDOMAIN,
+            dict(uuid=self.uuidAction, value=f"setMode/{target_mode}"),
+        )
+
+        self.schedule_update_ha_state()
+
+
 class LoxoneRoomControllerV2(LoxoneEntity, ClimateEntity, ABC):
     """Loxone room controller"""
 
-    attr_supported_features = (
+    _attr_supported_features = (
         ClimateEntityFeature.PRESET_MODE
         | ClimateEntityFeature.TARGET_TEMPERATURE
         | ClimateEntityFeature.TURN_OFF
@@ -149,6 +371,7 @@ class LoxoneRoomControllerV2(LoxoneEntity, ClimateEntity, ABC):
         Implemented by platform classes.
         """
         return {
+            **self._attr_extra_state_attributes,
             "is_overridden": self.is_overridden,
         }
 
@@ -212,7 +435,13 @@ class LoxoneRoomControllerV2(LoxoneEntity, ClimateEntity, ABC):
 
         Need to be a subset of HVAC_MODES.
         """
-        return [HVACMode.AUTO, HVACMode.HEAT, HVACMode.HEAT_COOL, HVACMode.COOL]
+        return [
+            HVACMode.AUTO,
+            HVACMode.HEAT,
+            HVACMode.HEAT_COOL,
+            HVACMode.COOL,
+            HVACMode.OFF,
+        ]
 
     @property
     def temperature_unit(self) -> str:
@@ -296,9 +525,10 @@ class LoxoneRoomControllerV2(LoxoneEntity, ClimateEntity, ABC):
 class LoxoneAcControl(LoxoneEntity, ClimateEntity, ABC):
     """Representation of a ACControl Loxone device."""
 
-    attr_supported_features = (
-        ClimateEntityFeature.PRESET_MODE
-        | ClimateEntityFeature.TARGET_TEMPERATURE
+    _attr_supported_features = (
+        ClimateEntityFeature.TARGET_TEMPERATURE
+        | ClimateEntityFeature.FAN_MODE
+        | ClimateEntityFeature.SWING_MODE
         | ClimateEntityFeature.TURN_OFF
         | ClimateEntityFeature.TURN_ON
     )
@@ -341,11 +571,8 @@ class LoxoneAcControl(LoxoneEntity, ClimateEntity, ABC):
         Implemented by platform classes.
         """
         return {
-            "uuid": self.uuidAction,
+            **self._attr_extra_state_attributes,
             "device_type": self.type,
-            "room": self.room,
-            "category": self.cat,
-            "platform": "loxone",
         }
 
     @property
@@ -370,16 +597,45 @@ class LoxoneAcControl(LoxoneEntity, ClimateEntity, ABC):
         Need to be one of HVAC_MODE_*.
         """
         if self.get_state_value("status"):
-            return HVACMode.AUTO
+            if self.get_state_value("mode") == 2:
+                return HVACMode.HEAT
+            elif self.get_state_value("mode") == 3:
+                return HVACMode.COOL
+            elif self.get_state_value("mode") == 4:
+                return HVACMode.DRY
+            elif self.get_state_value("mode") == 5:
+                return HVACMode.FAN_ONLY
+            else:
+                return HVACMode.AUTO
         return HVACMode.OFF
 
     def set_hvac_mode(self, hvac_mode):
         """Set new target hvac mode."""
+
+        mode = 1
+        match hvac_mode:
+            case HVACMode.HEAT:
+                mode = 2
+            case HVACMode.COOL:
+                mode = 3
+            case HVACMode.DRY:
+                mode = 4
+            case HVACMode.FAN_ONLY:
+                mode = 5
+        
         self.hass.bus.fire(
             SENDDOMAIN,
             dict(
                 uuid=self.uuidAction,
                 value="off" if hvac_mode == HVACMode.OFF else "on",
+            ),
+        )
+        
+        self.hass.bus.fire(
+            SENDDOMAIN,
+            dict(
+                uuid=self.uuidAction,
+                value=f'setMode/{mode}',
             ),
         )
 
@@ -389,7 +645,7 @@ class LoxoneAcControl(LoxoneEntity, ClimateEntity, ABC):
 
         Need to be a subset of HVAC_MODES.
         """
-        return [HVACMode.OFF, HVACMode.AUTO]
+        return [HVACMode.OFF, HVACMode.HEAT, HVACMode.COOL, HVACMode.DRY, HVACMode.FAN_ONLY, HVACMode.AUTO]
 
     @property
     def temperature_unit(self) -> str:
@@ -409,4 +665,69 @@ class LoxoneAcControl(LoxoneEntity, ClimateEntity, ABC):
     @property
     def target_temperature_step(self) -> float | None:
         """Return the supported step of target temperature."""
-        return 1
+        return 0.5
+        
+    @property
+    def fan_mode(self) -> str | None:
+        """Return current fan mode."""
+        
+        if self.get_state_value("fanspeeds") is not None:
+            modes = json.loads(self.get_state_value("fanspeeds"))
+            
+            for mode in modes:
+                if self.get_state_value("fan") == mode["id"]:
+                    return mode["name"]
+
+        return "Auto"
+
+    def set_fan_mode(self, fan_mode):
+        """Set new target fan mode."""
+        self.hass.bus.fire(
+            SENDDOMAIN,
+            dict(
+                uuid=self.uuidAction,
+                value=f'setFan/{next((o["id"] for o in json.loads(self.get_state_value("fanspeeds")) if o["name"] == fan_mode), None)}',
+            ),
+        )
+
+    @property
+    def fan_modes(self) -> list[str]:
+        """Return the list of available hvac operation modes."""
+        
+        if self.get_state_value("fanspeeds") is not None:
+            return [o["name"] for o in json.loads(self.get_state_value("fanspeeds"))]
+        else:
+            return None
+        
+    @property
+    def swing_mode(self) -> str | None:
+        """Return current swing mode."""
+        
+        if self.get_state_value("airflows") is not None:
+            modes = json.loads(self.get_state_value("airflows"))
+            
+            for mode in modes:
+                if self.get_state_value("ventMode") == mode["id"]:
+                    return mode["name"]
+
+        return "Auto"
+
+    def set_swing_mode(self, swing_mode):
+        """Set new target swing mode."""
+        
+        self.hass.bus.fire(
+            SENDDOMAIN,
+            dict(
+                uuid=self.uuidAction,
+                value=f'setAirDir/{next((o["id"] for o in json.loads(self.get_state_value("airflows")) if o["name"] == swing_mode), None)}',
+            ),
+        )
+
+    @property
+    def swing_modes(self) -> list[str]:
+        """Return the list of available swing modes."""
+        
+        if self.get_state_value("airflows") is not None:
+            return [o["name"] for o in json.loads(self.get_state_value("airflows"))]
+        else:
+            return None

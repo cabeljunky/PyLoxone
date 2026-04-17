@@ -1,7 +1,6 @@
 # Describes the format for available Loxone services
 
 event_websocket_command:
-  description: Send websocket commands to the loxone server. You can send a command to the Miniserver using an entity or using a UUID. If you specify both, the command will be sent to the Entity. More info and commands https://www.loxone.com/dede/kb/api/
   fields:
     uuid:
       name: UUID
@@ -24,7 +23,6 @@ event_websocket_command:
         text:
 
 event_secured_websocket_command:
-  description: Send secured websocket commands to the loxone server. You can send a command to the Miniserver using an entity or using a UUID. If you specify both, the command will be sent to the Entity. More info and commands https://www.loxone.com/dede/kb/api/
   fields:
     uuid:
       name: UUID
@@ -64,6 +62,13 @@ sync_areas:
       default: false
       selector:
         boolean:
+
+reload:
+  description: >
+    Reloads the Loxone integration by reconnecting to the Miniserver and 
+    refreshing all entities. This is useful after making configuration 
+    changes in Loxone Config or when connection issues occur. All current 
+    entity states will be re\-synchronized from the Miniserver.
 
 enable_sun_automation:
   description: Enable Sun automation for Loxone Jalousie
